@@ -40,7 +40,17 @@ export class SimulationEngine {
     this.orbitCalc = calculateCircularOrbit(dest, alt, inc);
     this.celestialBody = CELESTIAL_BODIES[dest] || CELESTIAL_BODIES.earth;
 
-    const totalBatteryCapacityWh = Number(this.mission?.spacecraft?.battery?.capacityWh) || 1000;
+    // Preserve an explicitly configured zero battery capacity.
+    // Apply the 1000 Wh fallback only when the capacity is missing.
+    const configuredBatteryCapacityWh = this.mission?.spacecraft?.battery?.capacityWh;
+    const parsedBatteryCapacityWh = configuredBatteryCapacityWh == null
+      ? 1000
+      : Number(configuredBatteryCapacityWh);
+
+    const totalBatteryCapacityWh = Number.isFinite(parsedBatteryCapacityWh) && parsedBatteryCapacityWh >= 0
+      ? parsedBatteryCapacityWh
+      : 0;
+
     const storageCapacityGB = Number(this.mission?.spacecraft?.computing?.storageCapacityGB) || 64;
 
     this.state = {
@@ -60,9 +70,9 @@ export class SimulationEngine {
       // Power & Battery
       currentPowerGenerationW: 0,
       currentPowerConsumptionW: 0,
-      batteryEnergyWh: totalBatteryCapacityWh, // Starts fully charged on launchpad
+      batteryEnergyWh: totalBatteryCapacityWh, // Starts fully charged when a battery is installed
       batteryCapacityWh: totalBatteryCapacityWh,
-      batteryPercent: 100,
+      batteryPercent: totalBatteryCapacityWh > 0 ? 100 : 0,
 
       // Data & Storage
       onboardStoredDataMB: 0,
@@ -210,8 +220,11 @@ export class SimulationEngine {
     });
 
     if (this.state.status === SIMULATION_PHASES.LAUNCH) {
-      // Internal battery power during launch under fairing
-      this.state.currentPowerGenerationW = 0;
+      // Solar arrays are assumed stowed under the launch vehicle fairing.
+      // An RTG, however, can provide continuous power during launch.
+      this.state.currentPowerGenerationW = this.mission?.spacecraft?.power?.isRTG
+        ? powerConfig.eclipseGenerationW
+        : 0;
       this.state.currentPowerConsumptionW = powerConfig.busBasePowerW * 0.5;
     } else if (this.state.isInEclipse) {
       this.state.currentPowerGenerationW = powerConfig.eclipseGenerationW;
@@ -225,16 +238,40 @@ export class SimulationEngine {
     const netPowerWatts = this.state.currentPowerGenerationW - this.state.currentPowerConsumptionW;
     const netEnergyWh = (netPowerWatts * dt) / 3600;
 
-    this.state.batteryEnergyWh = Math.max(
-      0,
-      Math.min(this.state.batteryCapacityWh, this.state.batteryEnergyWh + netEnergyWh)
-    );
-    this.state.batteryPercent = (this.state.batteryEnergyWh / this.state.batteryCapacityWh) * 100;
+    // Keep battery energy within its installed capacity.
+    // A spacecraft with no battery stores no energy, even if its power
+    // source generates a surplus (for example, an RTG-powered spacecraft).
+    if (this.state.batteryCapacityWh > 0) {
+      this.state.batteryEnergyWh = Math.max(
+        0,
+        Math.min(this.state.batteryCapacityWh, this.state.batteryEnergyWh + netEnergyWh)
+      );
 
-    // Check for catastrophic battery exhaustion
-    if (this.state.batteryEnergyWh <= 0 && this.state.isInEclipse) {
+      this.state.batteryPercent = Math.min(
+        100,
+        Math.max(0, (this.state.batteryEnergyWh / this.state.batteryCapacityWh) * 100)
+      );
+    } else {
+      this.state.batteryEnergyWh = 0;
+      this.state.batteryPercent = 0;
+    }
+
+    // A depleted or absent battery is only fatal when available generation
+    // cannot support the current spacecraft load. This allows an adequately
+    // sized RTG to operate through eclipse without a battery.
+    const powerDeficitW =
+      this.state.currentPowerConsumptionW - this.state.currentPowerGenerationW;
+
+    const batteryUnavailableOrDepleted =
+      this.state.batteryCapacityWh <= 0 || this.state.batteryEnergyWh <= 0;
+
+    const spacecraftHasPowerShortfall =
+      powerDeficitW > 1e-9 && batteryUnavailableOrDepleted;
+
+    if (spacecraftHasPowerShortfall) {
       this.state.status = SIMULATION_PHASES.FAILED;
-      this.state.failureReason = 'Battery completely exhausted during orbital eclipse. Spacecraft browned out and tumbled into uncontrolled spin.';
+      this.state.failureReason =
+        `Available generation (${this.state.currentPowerGenerationW.toFixed(1)} W) and stored battery energy (${this.state.batteryEnergyWh.toFixed(1)} Wh) cannot support the current load (${this.state.currentPowerConsumptionW.toFixed(1)} W).`;
       this.logEvent('CRITICAL', 'POWER LOSS', this.state.failureReason);
       this.evaluateFinalScore();
       return this.state;

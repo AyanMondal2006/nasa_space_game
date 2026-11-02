@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useMission } from '../state/MissionContext.js';
+import { useMission } from '../state/MissionContext.jsx';
 import SpaceVisualization3D from '../components/visualization/SpaceVisualization3D.jsx';
 import { 
   Play, 

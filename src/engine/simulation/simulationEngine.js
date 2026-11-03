@@ -51,7 +51,16 @@ export class SimulationEngine {
       ? parsedBatteryCapacityWh
       : 0;
 
-    const storageCapacityGB = Number(this.mission?.spacecraft?.computing?.storageCapacityGB) || 64;
+    // Preserve an explicitly configured zero storage capacity.
+    // Use the existing 64 GB fallback only when the value is missing.
+    const configuredStorageCapacityGB = this.mission?.spacecraft?.computing?.storageCapacityGB;
+    const parsedStorageCapacityGB = configuredStorageCapacityGB == null
+      ? 64
+      : Number(configuredStorageCapacityGB);
+
+    const storageCapacityGB = Number.isFinite(parsedStorageCapacityGB) && parsedStorageCapacityGB >= 0
+      ? parsedStorageCapacityGB
+      : 0;
 
     this.state = {
       status: SIMULATION_PHASES.PRE_LAUNCH,
@@ -79,6 +88,8 @@ export class SimulationEngine {
       maxStorageMB: storageCapacityGB * 1024,
       totalDataCollectedMB: 0,
       totalDataDownlinkedMB: 0,
+      totalDataDroppedMB: 0,
+      storageOverflowAlerted: false,
 
       // Comms & Contact
       isContactingGroundStation: false,
@@ -282,21 +293,50 @@ export class SimulationEngine {
 
     // 5. Scientific Data Generation & Downlink
     if (this.state.status === SIMULATION_PHASES.PRIMARY_OPS) {
+      const dataDutyCycleFraction = 0.6;
       const dataCalc = calculateDataBudget({
         instruments: this.mission?.spacecraft?.instruments || [],
         computing: this.mission?.spacecraft?.computing,
-        dutyCycleFraction: 0.6,
+        dutyCycleFraction: dataDutyCycleFraction,
       });
 
-      // Data generated in this tick (MB)
-      const dataGenTickMB = (dataCalc.effectiveRateMBps * dt);
-      this.state.totalDataCollectedMB += dataGenTickMB;
-      this.state.onboardStoredDataMB = Math.min(
-        this.state.maxStorageMB,
-        this.state.onboardStoredDataMB + dataGenTickMB
-      );
+      // Apply the same validated duty cycle used by the data calculator.
+      // effectiveRateMBps is the compressed data rate in MB/s.
+      const effectiveDataRateMBps = Number(dataCalc.effectiveRateMBps);
+      const validatedDutyCycle = Number(dataCalc.dutyCycleFraction);
+      const safeDataRateMBps = Number.isFinite(effectiveDataRateMBps) && effectiveDataRateMBps > 0
+        ? effectiveDataRateMBps
+        : 0;
+      const safeDutyCycle = Number.isFinite(validatedDutyCycle)
+        ? Math.min(1, Math.max(0, validatedDutyCycle))
+        : 0;
 
-      // Downlink execution if contacting ground station
+      // Average generated data for this simulation tick (MB).
+      const dataGenTickMB = safeDataRateMBps * dt * safeDutyCycle;
+      this.state.totalDataCollectedMB += dataGenTickMB;
+
+      // Store only the amount that fits in the remaining onboard capacity.
+      // Any excess is explicitly recorded as dropped scientific data.
+      const availableStorageMB = Math.max(
+        0,
+        this.state.maxStorageMB - this.state.onboardStoredDataMB
+      );
+      const acceptedDataMB = Math.min(dataGenTickMB, availableStorageMB);
+      const droppedDataMB = Math.max(0, dataGenTickMB - acceptedDataMB);
+
+      this.state.onboardStoredDataMB += acceptedDataMB;
+      this.state.totalDataDroppedMB += droppedDataMB;
+
+      if (droppedDataMB > 0 && !this.state.storageOverflowAlerted) {
+        this.logEvent(
+          'WARNING',
+          'DATA STORAGE OVERFLOW',
+          `Onboard storage is full. ${droppedDataMB.toFixed(2)} MB of newly generated science data could not be stored.`
+        );
+        this.state.storageOverflowAlerted = true;
+      }
+
+      // Downlink execution if contacting a ground station.
       if (this.state.isContactingGroundStation) {
         const commsCalc = calculateCommunicationsBudget({
           comms: this.mission?.spacecraft?.comms,
@@ -304,11 +344,27 @@ export class SimulationEngine {
           altitudeKm: this.orbitCalc.altitudeKm,
         });
 
-        this.state.currentDownlinkRateMbps = commsCalc.effectiveDownlinkRateMbps;
-        const downlinkCapacityMB = commsCalc.effectiveDownlinkRateMBps * dt;
-        const actualDownlinkedMB = Math.min(this.state.onboardStoredDataMB, downlinkCapacityMB);
+        const reportedDownlinkRateMbps = Number(commsCalc.effectiveDownlinkRateMbps);
+        const safeDownlinkRateMbps = Number.isFinite(reportedDownlinkRateMbps) && reportedDownlinkRateMbps > 0
+          ? reportedDownlinkRateMbps
+          : 0;
+        const reportedDownlinkRateMBps = Number(commsCalc.effectiveDownlinkRateMBps);
+        const safeDownlinkRateMBps = Number.isFinite(reportedDownlinkRateMBps) && reportedDownlinkRateMBps > 0
+          ? reportedDownlinkRateMBps
+          : 0;
 
-        this.state.onboardStoredDataMB -= actualDownlinkedMB;
+        this.state.currentDownlinkRateMbps = safeDownlinkRateMbps;
+
+        const downlinkCapacityMB = safeDownlinkRateMBps * dt;
+        const actualDownlinkedMB = Math.min(
+          this.state.onboardStoredDataMB,
+          downlinkCapacityMB
+        );
+
+        this.state.onboardStoredDataMB = Math.max(
+          0,
+          this.state.onboardStoredDataMB - actualDownlinkedMB
+        );
         this.state.totalDataDownlinkedMB += actualDownlinkedMB;
       } else {
         this.state.currentDownlinkRateMbps = 0;
@@ -451,6 +507,8 @@ export class SimulationEngine {
       batteryPercent: Number(this.state.batteryPercent.toFixed(1)),
       batteryEnergyWh: Math.round(this.state.batteryEnergyWh),
       storedDataMB: Math.round(this.state.onboardStoredDataMB),
+      totalDataCollectedMB: Number(this.state.totalDataCollectedMB.toFixed(2)),
+      totalDataDroppedMB: Number(this.state.totalDataDroppedMB.toFixed(2)),
       downlinkMbps: Number(this.state.currentDownlinkRateMbps.toFixed(2)),
       totalDownlinkedGB: Number((this.state.totalDataDownlinkedMB / 1024).toFixed(2)),
       isInEclipse: this.state.isInEclipse,

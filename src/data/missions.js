@@ -1,3 +1,4 @@
+
 /**
  * Playable Mission Campaigns & Scenarios
  * Each scenario defines explicit physical objectives, required payloads, budget limits,
@@ -25,6 +26,7 @@ export const MISSION_CAMPAIGNS = [
         title: 'Collect 250 GB of Science Imagery',
         type: 'data_volume',
         targetValueGB: 250,
+        dataSource: 'collected',
         unit: 'GB',
         weight: 0.40,
         isPrimary: true,
@@ -52,13 +54,13 @@ export const MISSION_CAMPAIGNS = [
       },
       {
         id: 'obj-earth-budget-efficiency',
-        title: 'Complete Mission Under Allocated Budget',
+        title: 'Preserve At Least 10% Budget Contingency',
         type: 'budget_performance',
-        targetValuePercent: 100,
+        targetReservePercent: 10,
         unit: '%',
         weight: 0.15,
         isPrimary: false,
-        description: 'Preserve at least 10% contingency reserve upon commissioning.',
+        description: 'Keep the estimated mission cost at least 10% below the allocated budget.',
       },
     ],
     requirements: {
@@ -103,6 +105,7 @@ export const MISSION_CAMPAIGNS = [
         title: 'Collect 150 GB of Lunar Polar Spectral Data',
         type: 'data_volume',
         targetValueGB: 150,
+        dataSource: 'collected',
         unit: 'GB',
         weight: 0.40,
         isPrimary: true,
@@ -180,6 +183,7 @@ export const MISSION_CAMPAIGNS = [
         title: 'Return 400 GB of Planetary Science Data',
         type: 'data_volume',
         targetValueGB: 400,
+        dataSource: 'downlinked',
         unit: 'GB',
         weight: 0.40,
         isPrimary: true,
@@ -267,6 +271,7 @@ export const MISSION_CAMPAIGNS = [
         title: 'Generate Maximum Scientific Return',
         type: 'data_volume',
         targetValueGB: 300,
+        dataSource: 'collected',
         unit: 'GB',
         weight: 0.50,
         isPrimary: true,

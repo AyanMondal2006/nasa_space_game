@@ -217,7 +217,11 @@ export class SimulationEngine {
       this.logEvent('INFO', 'SUNLIGHT EXIT', 'Sunrise confirmed. Solar arrays generating power; recharging battery reserve.');
     }
 
-    // 3. Power Generation & Consumption
+    // 3. Ground Station Contact Window Evaluation
+    // Determine contact before selecting the spacecraft's operating power load.
+    this.updateGroundStationContact();
+
+    // 4. Power Generation & Consumption
     const powerConfig = calculatePowerBudget({
       powerSource: this.mission?.spacecraft?.power,
       battery: this.mission?.spacecraft?.battery,
@@ -230,6 +234,22 @@ export class SimulationEngine {
       bodyId: this.mission?.destination,
     });
 
+    // A ground-station contact enables the transmitter during primary operations.
+    // This model treats an established contact as an active transmission window.
+    const communicationTransmissionActive =
+      this.state.status === SIMULATION_PHASES.PRIMARY_OPS &&
+      this.state.isContactingGroundStation;
+
+    // The daylight load includes communication standby power, while peakLoadW
+    // includes full transmitter power. Their difference is the incremental
+    // power required to switch from standby to transmission.
+    const daylightLoadW = Number(powerConfig.daylightLoadW);
+    const peakLoadW = Number(powerConfig.peakLoadW);
+    const transmissionPowerIncrementW =
+      Number.isFinite(daylightLoadW) && Number.isFinite(peakLoadW)
+        ? Math.max(0, peakLoadW - daylightLoadW)
+        : 0;
+
     if (this.state.status === SIMULATION_PHASES.LAUNCH) {
       // Solar arrays are assumed stowed under the launch vehicle fairing.
       // An RTG, however, can provide continuous power during launch.
@@ -238,11 +258,19 @@ export class SimulationEngine {
         : 0;
       this.state.currentPowerConsumptionW = powerConfig.busBasePowerW * 0.5;
     } else if (this.state.isInEclipse) {
+      // Eclipse load already includes communication standby power.
+      // Add only the incremental transmitter load when contact is active.
       this.state.currentPowerGenerationW = powerConfig.eclipseGenerationW;
-      this.state.currentPowerConsumptionW = powerConfig.eclipseLoadW;
+      this.state.currentPowerConsumptionW =
+        powerConfig.eclipseLoadW +
+        (communicationTransmissionActive ? transmissionPowerIncrementW : 0);
     } else {
+      // Daylight: use the full peak load during transmission, otherwise
+      // use the normal observation/standby load.
       this.state.currentPowerGenerationW = powerConfig.daylightGenerationW;
-      this.state.currentPowerConsumptionW = powerConfig.daylightLoadW;
+      this.state.currentPowerConsumptionW = communicationTransmissionActive
+        ? powerConfig.peakLoadW
+        : powerConfig.daylightLoadW;
     }
 
     // Battery Integration: dE = (P_gen - P_load) * dt
@@ -287,9 +315,6 @@ export class SimulationEngine {
       this.evaluateFinalScore();
       return this.state;
     }
-
-    // 4. Ground Station Contact Window Evaluation
-    this.updateGroundStationContact();
 
     // 5. Scientific Data Generation & Downlink
     if (this.state.status === SIMULATION_PHASES.PRIMARY_OPS) {

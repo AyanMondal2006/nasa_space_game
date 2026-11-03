@@ -14,6 +14,41 @@ import { calculateMissionScore } from './missionScoring.js';
 import { CELESTIAL_BODIES } from '../constants/physics.js';
 import { formatMET } from '../../utils/formatters.js';
 
+/** Return a finite number, or null when evidence is absent/invalid. */
+function readFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** Keep objective progress finite and within the 0-100% range. */
+function clampProgress(value) {
+  const parsed = readFiniteNumber(value);
+  if (parsed === null) return 0;
+  return Math.min(100, Math.max(0, parsed));
+}
+
+/** Progress for objectives that require an actual value to reach a minimum. */
+function progressTowardMinimum(actualValue, targetValue) {
+  const actual = readFiniteNumber(actualValue);
+  const target = readFiniteNumber(targetValue);
+
+  if (actual === null || target === null || target <= 0) return 0;
+  return clampProgress((actual / target) * 100);
+}
+
+/** Progress for objectives that require a measured value to stay below a maximum. */
+function progressWithinMaximum(actualValue, maximumValue) {
+  const actual = readFiniteNumber(actualValue);
+  const maximum = readFiniteNumber(maximumValue);
+
+  if (actual === null || maximum === null || maximum <= 0 || actual < 0) return 0;
+  if (actual <= maximum) return 100;
+  return clampProgress((maximum / actual) * 100);
+}
+
 export const SIMULATION_PHASES = {
   PRE_LAUNCH: 'PRE_LAUNCH',
   LAUNCH: 'LAUNCH',
@@ -94,6 +129,12 @@ export class SimulationEngine {
       batteryEnergyWh: totalBatteryCapacityWh,
       batteryCapacityWh: totalBatteryCapacityWh,
       batteryPercent: totalBatteryCapacityWh > 0 ? 100 : 0,
+      // Highest observed battery discharge since the simulation started.
+      maxObservedBatteryDoDPercent: 0,
+
+      // Populated only when a future propulsion/maneuver model reports an
+      // achieved maneuver. A scripted phase transition is not delta-V proof.
+      achievedDeltaVMs: 0,
 
       // Data & Storage
       onboardStoredDataMB: 0,
@@ -376,6 +417,16 @@ export class SimulationEngine {
       this.state.batteryPercent = 0;
     }
 
+    // Record the deepest discharge actually observed during the simulation.
+    // An absent battery is not assigned an artificial 100% DoD observation.
+    if (this.state.batteryCapacityWh > 0) {
+      const observedDoDPercent = 100 - this.state.batteryPercent;
+      this.state.maxObservedBatteryDoDPercent = Math.max(
+        this.state.maxObservedBatteryDoDPercent,
+        observedDoDPercent
+      );
+    }
+
     // A depleted or absent battery is only fatal when available generation
     // cannot support the current spacecraft load.
     const powerDeficitW =
@@ -403,6 +454,9 @@ export class SimulationEngine {
         this.state.failureReason
       );
 
+      // Capture the latest objective evidence before computing a failure score.
+      this.updateObjectivesProgress();
+
       this.evaluateFinalScore();
 
       return this.state;
@@ -423,17 +477,18 @@ export class SimulationEngine {
       const effectiveDataRateMBps =
         Number(dataCalc.effectiveRateMBps);
 
-      const validatedDutyCycle =
-        Number(dataCalc.dutyCycleFraction);
-
       const safeDataRateMBps =
         Number.isFinite(effectiveDataRateMBps) && effectiveDataRateMBps > 0
           ? effectiveDataRateMBps
           : 0;
 
+      // calculateDataBudget uses the supplied duty cycle but does not return
+      // it in its result object. Validate the actual input here; reading a
+      // nonexistent dataCalc.dutyCycleFraction would silently force data
+      // generation to zero for every simulation tick.
       const safeDutyCycle =
-        Number.isFinite(validatedDutyCycle)
-          ? Math.min(1, Math.max(0, validatedDutyCycle))
+        Number.isFinite(dataDutyCycleFraction)
+          ? Math.min(1, Math.max(0, dataDutyCycleFraction))
           : 0;
 
       // Average generated data for this simulation tick (MB).
@@ -668,80 +723,187 @@ export class SimulationEngine {
   }
 
   updateObjectivesProgress() {
+    const objectives = Array.isArray(this.mission?.objectives)
+      ? this.mission.objectives
+      : [];
 
-    const objectives = this.mission?.objectives || [];
+    const totalCollectedGB = Math.max(
+      0,
+      (readFiniteNumber(this.state.totalDataCollectedMB) ?? 0) / 1024
+    );
+    const totalDownlinkedGB = Math.max(
+      0,
+      (readFiniteNumber(this.state.totalDataDownlinkedMB) ?? 0) / 1024
+    );
 
-    const totalCollectedGB =
-      this.state.totalDataCollectedMB / 1024;
+    const powerMetrics = this.validationMetrics?.power;
+    const budgetMetrics = this.validationMetrics?.budget;
+    const thermalMetrics = this.validationMetrics?.thermal;
 
-    const totalDownlinkedGB =
-      this.state.totalDataDownlinkedMB / 1024;
-
-    objectives.forEach(obj => {
+    objectives.forEach((objective) => {
+      if (!objective || objective.id === null || objective.id === undefined) {
+        return;
+      }
 
       let progress = 0;
 
-      if (obj.type === 'data_volume') {
+      switch (objective.type) {
+        case 'data_volume': {
+          // Data-volume objectives measure collection by default. A campaign
+          // that explicitly requires returned data can set dataSource to
+          // 'downlinked' on that objective.
+          const dataSource = String(objective.dataSource || 'collected').toLowerCase();
+          const measuredDataGB = dataSource === 'downlinked'
+            ? totalDownlinkedGB
+            : totalCollectedGB;
+          const targetGB = readFiniteNumber(objective.targetValueGB);
 
-        const target = obj.targetValueGB || 100;
+          progress = progressTowardMinimum(measuredDataGB, targetGB);
+          break;
+        }
 
-        progress = Math.min(
-          100,
-          (totalDownlinkedGB / target) * 100
-        );
-
-      } else if (obj.type === 'downlink_efficiency') {
-
-        const targetPercent =
-          obj.targetValuePercent || 85;
-
-        const actualPercent =
-          this.state.totalDataCollectedMB > 0
-            ? (
-              this.state.totalDataDownlinkedMB /
-              this.state.totalDataCollectedMB
-            ) * 100
+        case 'downlink_efficiency': {
+          const collectedMB = Math.max(
+            0,
+            readFiniteNumber(this.state.totalDataCollectedMB) ?? 0
+          );
+          const downlinkedMB = Math.max(
+            0,
+            readFiniteNumber(this.state.totalDataDownlinkedMB) ?? 0
+          );
+          const targetPercent = readFiniteNumber(objective.targetValuePercent);
+          const actualPercent = collectedMB > 0
+            ? (downlinkedMB / collectedMB) * 100
             : 0;
 
-        progress = Math.min(
-          100,
-          (actualPercent / targetPercent) * 100
-        );
+          progress = progressTowardMinimum(actualPercent, targetPercent);
+          break;
+        }
 
-      } else if (obj.type === 'battery_health') {
+        case 'battery_health': {
+          // This objective is a maximum depth-of-discharge requirement,
+          // not a threshold on instantaneous battery state-of-charge.
+          const batteryCapacityWh = readFiniteNumber(this.state.batteryCapacityWh);
+          const targetMaxDoD = readFiniteNumber(objective.targetValueMaxDoD);
+          const normalizedTargetMaxDoD = targetMaxDoD !== null && targetMaxDoD > 1
+            ? targetMaxDoD / 100
+            : targetMaxDoD;
 
-        const minBattery = this.state.batteryPercent;
+          if (batteryCapacityWh !== null && batteryCapacityWh > 0) {
+            const observedDoDPercent = readFiniteNumber(
+              this.state.maxObservedBatteryDoDPercent
+            ) ?? 0;
+            const observedDoDFraction = observedDoDPercent / 100;
+            const validatedDoD = readFiniteNumber(powerMetrics?.dodReached);
+            const validatedDoDPercent = readFiniteNumber(powerMetrics?.dodPercent);
+            const validatedDoDFraction = validatedDoD !== null
+              ? validatedDoD
+              : (validatedDoDPercent !== null ? validatedDoDPercent / 100 : null);
 
-        progress =
-          minBattery >= 50
-            ? 100
-            : Math.max(0, minBattery * 2);
+            const actualDoDFraction = validatedDoDFraction === null
+              ? observedDoDFraction
+              : Math.max(observedDoDFraction, validatedDoDFraction);
 
-      } else if (obj.type === 'budget_performance') {
+            progress = progressWithinMaximum(
+              actualDoDFraction,
+              normalizedTargetMaxDoD
+            );
+          }
+          break;
+        }
 
-        progress = 100;
+        case 'budget_performance': {
+          const totalCost = readFiniteNumber(budgetMetrics?.totalCost);
+          const budgetLimit = readFiniteNumber(this.mission?.budgetLimitUSD);
+          // The current Earth campaign description requires at least 10% of
+          // the allocated budget to remain as contingency. Campaigns can
+          // override this threshold with objective.targetReservePercent.
+          const requiredReservePercent =
+            readFiniteNumber(objective.targetReservePercent) ?? 10;
 
-      } else if (obj.type === 'orbital_insertion') {
+          if (
+            totalCost !== null &&
+            totalCost >= 0 &&
+            budgetLimit !== null &&
+            budgetLimit > 0 &&
+            requiredReservePercent > 0
+          ) {
+            const actualReservePercent =
+              ((budgetLimit - totalCost) / budgetLimit) * 100;
+            progress = progressTowardMinimum(
+              actualReservePercent,
+              requiredReservePercent
+            );
+          }
+          break;
+        }
 
-        progress =
-          this.state.status === SIMULATION_PHASES.PRIMARY_OPS ||
-          this.state.status === SIMULATION_PHASES.COMPLETED
-            ? 100
-            : 30;
+        case 'power_margin': {
+          const actualPowerMarginPercent = readFiniteNumber(
+            powerMetrics?.daylightPowerMarginPercent
+          );
+          const targetPowerMarginPercent = readFiniteNumber(objective.targetValuePercent);
 
-      } else {
+          progress = progressTowardMinimum(
+            actualPowerMarginPercent,
+            targetPowerMarginPercent
+          );
+          break;
+        }
 
-        progress = Math.min(
-          100,
-          (
-            this.state.missionTimeSeconds /
-            this.state.targetDurationSeconds
-          ) * 100
-        );
+        case 'thermal_margin': {
+          // The current validation engine does not yet calculate thermal
+          // margin. This contract accepts that metric once implemented;
+          // missing evidence deliberately earns no progress.
+          const actualThermalMarginW = readFiniteNumber(
+            thermalMetrics?.thermalMarginW
+          );
+          const targetThermalMarginW = readFiniteNumber(objective.targetValueMinWatts);
+
+          progress = progressTowardMinimum(
+            actualThermalMarginW,
+            targetThermalMarginW
+          );
+          break;
+        }
+
+        case 'orbital_insertion': {
+          // A scripted mission phase is not proof that the required delta-V
+          // maneuver occurred. The propulsion model must report achievedDeltaVMs.
+          const achievedDeltaVMs = readFiniteNumber(this.state.achievedDeltaVMs);
+          const targetDeltaVMs = readFiniteNumber(objective.targetValueDeltaVMs);
+
+          progress = progressTowardMinimum(
+            achievedDeltaVMs,
+            targetDeltaVMs
+          );
+          break;
+        }
+
+        case 'operational_readiness': {
+          // The current validator does not yet publish a consolidated
+          // readiness percentage. Use it when added; never substitute time.
+          const readinessPercent = readFiniteNumber(
+            this.validationMetrics?.operationalReadinessPercent
+          );
+          const targetReadinessPercent = readFiniteNumber(objective.targetValuePercent);
+
+          progress = progressTowardMinimum(
+            readinessPercent,
+            targetReadinessPercent
+          );
+          break;
+        }
+
+        default:
+          // Unknown objective types remain uncredited until an objective-
+          // specific engineering metric is implemented.
+          progress = 0;
       }
 
-      this.state.objectivesProgress[obj.id] =
-        Math.round(progress);
+      this.state.objectivesProgress[objective.id] = Math.round(
+        clampProgress(progress)
+      );
     });
   }
 
@@ -763,6 +925,9 @@ export class SimulationEngine {
 
       batteryPercent:
         Number(this.state.batteryPercent.toFixed(1)),
+
+      maxObservedBatteryDoDPercent:
+        Number(this.state.maxObservedBatteryDoDPercent.toFixed(1)),
 
       batteryEnergyWh:
         Math.round(this.state.batteryEnergyWh),

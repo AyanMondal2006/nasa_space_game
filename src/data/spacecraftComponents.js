@@ -1,6 +1,10 @@
+
 /**
  * Spacecraft Component Catalog
- * Central repository for all verified aerospace subsystems, instruments, and hardware modules.
+ * Central repository for spacecraft subsystems, instruments, and hardware.
+ *
+ * Thermal screening parameters are conceptual game-design assumptions,
+ * not certified aerospace hardware specifications.
  */
 
 export const COMPONENT_CATEGORIES = {
@@ -61,7 +65,7 @@ export const POWER_CATALOG = [
     category: COMPONENT_CATEGORIES.POWER,
     massKg: 18,
     costUSD: 850_000,
-    generationW: 240, // 240W at 1 AU
+    generationW: 240,
     isRTG: false,
     efficiency: '19%',
     description: 'Robust body-mounted solar cells. Highly reliable with zero deployment mechanism risks, but lower total surface area.',
@@ -72,7 +76,7 @@ export const POWER_CATALOG = [
     category: COMPONENT_CATEGORIES.POWER,
     massKg: 45,
     costUSD: 3_200_000,
-    generationW: 1100, // 1.1 kW at 1 AU
+    generationW: 1100,
     isRTG: false,
     efficiency: '32%',
     description: 'Dual articulated solar wings using high-efficiency Gallium-Arsenide cells with 1-axis solar tracking gimbals.',
@@ -83,7 +87,7 @@ export const POWER_CATALOG = [
     category: COMPONENT_CATEGORIES.POWER,
     massKg: 82,
     costUSD: 7_500_000,
-    generationW: 2400, // 2.4 kW at 1 AU
+    generationW: 2400,
     isRTG: false,
     efficiency: '34%',
     description: 'Next-generation lightweight fan-fold solar arrays, providing massive aperture area for Mars or high-power SAR missions.',
@@ -94,7 +98,7 @@ export const POWER_CATALOG = [
     category: COMPONENT_CATEGORIES.POWER,
     massKg: 52,
     costUSD: 24_000_000,
-    generationW: 320, // Continuous day and night!
+    generationW: 320,
     isRTG: true,
     efficiency: '8% (thermal-electric)',
     description: 'Plutonium-238 general purpose heat source RTG. Delivers continuous, uninterrupted power independent of sunlight or planetary eclipse.',
@@ -142,7 +146,7 @@ export const INSTRUMENT_CATALOG = [
     massKg: 42,
     costUSD: 12_000_000,
     powerConsumptionW: 95,
-    dataRateMbps: 25.0, // 25 Mbps while imaging
+    dataRateMbps: 25.0,
     scienceValue: 40,
     measurementType: 'Visible Surface Topography & Mapping',
     groundResolution: '0.4 m / pixel (from 500 km)',
@@ -257,7 +261,7 @@ export const COMMS_CATALOG = [
     massKg: 6,
     costUSD: 650_000,
     powerConsumptionW: 25,
-    bandwidthMbps: 2.0, // 2 Mbps in LEO
+    bandwidthMbps: 2.0,
     isOptical: false,
     antennaType: 'Patch Omni',
     frequencyBand: 'S-Band (2.2 GHz)',
@@ -270,7 +274,7 @@ export const COMMS_CATALOG = [
     massKg: 16,
     costUSD: 2_800_000,
     powerConsumptionW: 65,
-    bandwidthMbps: 45.0, // 45 Mbps in LEO, ~2 Mbps at Moon
+    bandwidthMbps: 45.0,
     isOptical: false,
     antennaType: 'Medium-Gain Horn',
     frequencyBand: 'X-Band (8.4 GHz)',
@@ -283,7 +287,7 @@ export const COMMS_CATALOG = [
     massKg: 38,
     costUSD: 7_400_000,
     powerConsumptionW: 130,
-    bandwidthMbps: 220.0, // 220 Mbps in LEO, ~15 Mbps at Moon, ~2.5 Mbps at Mars
+    bandwidthMbps: 220.0,
     isOptical: false,
     antennaType: 'High-Gain Parabolic Reflector',
     frequencyBand: 'Ka-Band (32 GHz)',
@@ -296,7 +300,7 @@ export const COMMS_CATALOG = [
     massKg: 46,
     costUSD: 16_000_000,
     powerConsumptionW: 160,
-    bandwidthMbps: 650.0, // 650 Mbps in LEO, ~60 Mbps at Mars
+    bandwidthMbps: 650.0,
     isOptical: true,
     antennaType: 'Pico-Radian Laser Transceiver',
     frequencyBand: 'Near-Infrared (1550 nm)',
@@ -323,7 +327,7 @@ export const ADCS_CATALOG = [
     massKg: 24,
     costUSD: 4_200_000,
     powerConsumptionW: 42,
-    pointingAccuracyDeg: 0.005, // 18 arcseconds
+    pointingAccuracyDeg: 0.005,
     supportsDeepSpace: true,
     description: 'High-precision aerospace ADCS with quad reaction wheels and dual autonomous star cameras. Meets exacting requirements of optical telescopes and SAR.',
   },
@@ -334,7 +338,7 @@ export const ADCS_CATALOG = [
     massKg: 58,
     costUSD: 11_000_000,
     powerConsumptionW: 95,
-    pointingAccuracyDeg: 0.001, // 3.6 arcseconds
+    pointingAccuracyDeg: 0.001,
     supportsDeepSpace: true,
     description: 'Agile spacecraft agility system capable of rapid target slew rates and sub-arcsecond scientific stability for heavy payloads.',
   },
@@ -349,7 +353,7 @@ export const COMPUTING_CATALOG = [
     costUSD: 2_400_000,
     powerConsumptionW: 16,
     storageCapacityGB: 16,
-    compressionFactor: 0.7, // 30% lossless compression
+    compressionFactor: 0.7,
     radiationTolerance: '100 krad (Si)',
     description: 'Proven radiation-hardened flight computer with ultra-high reliability and zero single-event latchups.',
   },
@@ -361,7 +365,7 @@ export const COMPUTING_CATALOG = [
     costUSD: 5_200_000,
     powerConsumptionW: 28,
     storageCapacityGB: 128,
-    compressionFactor: 0.5, // 50% compression
+    compressionFactor: 0.5,
     radiationTolerance: '150 krad (Si)',
     description: 'Dual lockstep processor with high-density space-qualified NVMe solid state recorder (SSR) for multi-gigabit instrument buffers.',
   },
@@ -373,7 +377,7 @@ export const COMPUTING_CATALOG = [
     costUSD: 9_800_000,
     powerConsumptionW: 55,
     storageCapacityGB: 512,
-    compressionFactor: 0.35, // 65% neural image compression & cloud masking
+    compressionFactor: 0.35,
     radiationTolerance: '80 krad (Si)',
     description: 'Onboard neural accelerator automatically detects cloud-free imagery and compresses science data before downlink.',
   },
@@ -386,8 +390,28 @@ export const THERMAL_CATALOG = [
     category: COMPONENT_CATEGORIES.THERMAL,
     massKg: 12,
     costUSD: 450_000,
-    powerConsumptionW: 8, // Survival heaters only
+    powerConsumptionW: 8,
     supportedTempRange: '-40°C to +85°C',
+
+    thermalScreeningModel: {
+      radiatorAreaM2: 0.65,
+      radiatorEmissivity: 0.80,
+      radiatorOperatingTemperatureK: 285,
+      viewFactorToColdSink: 0.65,
+      assumptionStatus: 'GAME_DESIGN_ASSUMPTION',
+    },
+
+    // Conceptual cold-case assumptions for the simplified survival model.
+    // Heater allocation does not exceed this subsystem's 8 W electrical draw.
+    coldCaseScreeningModel: {
+      effectiveInsulatedAreaM2: 1.2,
+      effectiveInsulationEmissivity: 0.03,
+      viewFactorToColdSink: 0.85,
+      conductiveHeatLeakW: 20,
+      heaterPowerAvailableW: 8,
+      assumptionStatus: 'GAME_DESIGN_ASSUMPTION',
+    },
+
     description: 'Kapton/Mylar aluminized blankets and silver teflon thermal radiators. Lightweight and zero maintenance.',
   },
   {
@@ -398,6 +422,28 @@ export const THERMAL_CATALOG = [
     costUSD: 1_800_000,
     powerConsumptionW: 24,
     supportedTempRange: '-70°C to +110°C',
+
+    thermalScreeningModel: {
+      radiatorAreaM2: 1.75,
+      radiatorEmissivity: 0.85,
+      radiatorOperatingTemperatureK: 300,
+      viewFactorToColdSink: 0.85,
+      assumptionStatus: 'GAME_DESIGN_ASSUMPTION',
+    },
+
+    // Conceptual cold-case assumptions.
+    // Heater allocation is limited to the subsystem's 24 W electrical draw.
+    // Closed-louver insulation performance is represented by effective
+    // emissivity, conductive leakage and insulated area.
+    coldCaseScreeningModel: {
+      effectiveInsulatedAreaM2: 1.6,
+      effectiveInsulationEmissivity: 0.03,
+      viewFactorToColdSink: 0.85,
+      conductiveHeatLeakW: 18,
+      heaterPowerAvailableW: 24,
+      assumptionStatus: 'GAME_DESIGN_ASSUMPTION',
+    },
+
     description: 'Bimetallic louvers and ammonia loop heat pipes for high-power electronics and varying solar illumination orbits.',
   },
   {
@@ -408,6 +454,10 @@ export const THERMAL_CATALOG = [
     costUSD: 6_200_000,
     powerConsumptionW: 80,
     supportedTempRange: 'Active cooling to 65 Kelvin (-208°C)',
+
+    thermalScreeningModel: null,
+    coldCaseScreeningModel: null,
+
     description: 'Stirling/pulse-tube mechanical cryocooler necessary for high-sensitivity thermal infrared and spectrometer focal planes.',
   },
 ];
@@ -458,7 +508,7 @@ export const PROPULSION_CATALOG = [
     costUSD: 12_500_000,
     ispSeconds: 1850,
     thrustN: 0.12,
-    powerConsumptionW: 750, // High power requirement!
+    powerConsumptionW: 750,
     propellantType: 'Supercritical Xenon Gas',
     description: 'Ultra-high efficiency ion propulsion. Massive specific impulse delivers thousands of m/s delta-V with minimal propellant mass, but requires high electrical power.',
   },

@@ -1,30 +1,48 @@
+
 /**
  * Spacecraft Mass Budget Engine
- * Calculates dry mass breakdown, propellant requirements via Tsiolkovsky equation,
- * engineering design margin (NASA standard 20%), and verifies launch vehicle lift margins.
+ *
+ * Calculates dry mass, engineering mass margin, required propellant,
+ * configured propellant load, theoretical delta-V capability, and launch mass.
+ *
+ * Delta-V capability is calculated with the ideal Tsiolkovsky rocket equation.
+ * This is a first-order educational model; it does not model staging, gravity
+ * losses, finite-burn guidance, propellant residuals, or tank pressurization.
  */
 
 import { CONSTANTS } from '../constants/physics.js';
 
-export const DEFAULT_MASS_MARGIN_FRACTION = 0.20; // 20% standard aerospace mass growth allowance
+export const DEFAULT_MASS_MARGIN_FRACTION = 0.20;
+
+function finiteNonNegative(value, fallback = 0) {
+  if (value === null || value === undefined || value === '') return fallback;
+
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) && parsed >= 0
+    ? parsed
+    : fallback;
+}
+
+function hasFiniteNonNegativeValue(value) {
+  if (value === null || value === undefined || value === '') return false;
+
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) && parsed >= 0;
+}
 
 /**
  * Calculates complete mass budget from selected subsystems and instruments.
- * 
- * @param {object} config - Spacecraft configuration
- * @param {object} config.bus - Bus structure component
- * @param {object} config.power - Power component (solar panels, battery)
- * @param {Array}  config.instruments - Array of scientific instruments
- * @param {object} config.comms - Communications subsystem
- * @param {object} config.adcs - Attitude determination and control subsystem
- * @param {object} config.computing - Onboard computer and data storage
- * @param {object} config.thermal - Thermal control subsystem
- * @param {object} config.propulsion - Propulsion system component
- * @param {number} config.requiredDeltaVMs - Required delta-V for mission maneuvers (m/s)
- * @param {number} [config.massMarginFraction=0.20] - Design margin fraction
- * @returns {object} Mass breakdown and totals
+ *
+ * initialPropellantKg, when supplied by the selected propulsion component,
+ * represents the configured propellant load. The engine calculates required
+ * propellant separately so that the design can be checked against that load.
+ *
+ * @param {object} config
+ * @returns {object} Mass breakdown, propellant requirement, and delta-V capability.
  */
-export function calculateMassBudget(config) {
+export function calculateMassBudget(config = {}) {
   const {
     bus = null,
     power = null,
@@ -39,18 +57,40 @@ export function calculateMassBudget(config) {
     massMarginFraction = DEFAULT_MASS_MARGIN_FRACTION,
   } = config || {};
 
-  // Individual subsystem masses
-  const busMass = Number(bus?.massKg) || 0;
-  const powerMass = (Number(power?.massKg) || 0) + (Number(battery?.massKg) || 0);
-  const instrumentsMass = (instruments || []).reduce((acc, inst) => acc + (Number(inst?.massKg) || 0), 0);
-  const commsMass = Number(comms?.massKg) || 0;
-  const adcsMass = Number(adcs?.massKg) || 0;
-  const computingMass = Number(computing?.massKg) || 0;
-  const thermalMass = Number(thermal?.massKg) || 0;
-  const propulsionDryMass = Number(propulsion?.massKg) || 0;
+  const safeRequiredDeltaVMs = finiteNonNegative(requiredDeltaVMs, 0);
 
-  // Total dry mass (spacecraft without propellant or growth margin)
-  const dryMass = busMass +
+  const parsedMarginFraction = Number(massMarginFraction);
+
+  const safeMassMarginFraction =
+    Number.isFinite(parsedMarginFraction) && parsedMarginFraction >= 0
+      ? parsedMarginFraction
+      : DEFAULT_MASS_MARGIN_FRACTION;
+
+  // Individual subsystem masses.
+  const busMass = finiteNonNegative(bus?.massKg);
+
+  const powerMass =
+    finiteNonNegative(power?.massKg) +
+    finiteNonNegative(battery?.massKg);
+
+  const safeInstruments = Array.isArray(instruments)
+    ? instruments
+    : [];
+
+  const instrumentsMass = safeInstruments.reduce(
+    (acc, instrument) => acc + finiteNonNegative(instrument?.massKg),
+    0
+  );
+
+  const commsMass = finiteNonNegative(comms?.massKg);
+  const adcsMass = finiteNonNegative(adcs?.massKg);
+  const computingMass = finiteNonNegative(computing?.massKg);
+  const thermalMass = finiteNonNegative(thermal?.massKg);
+  const propulsionDryMass = finiteNonNegative(propulsion?.massKg);
+
+  // Total dry mass and engineering growth allowance.
+  const dryMass =
+    busMass +
     powerMass +
     instrumentsMass +
     commsMass +
@@ -59,27 +99,71 @@ export function calculateMassBudget(config) {
     thermalMass +
     propulsionDryMass;
 
-  // Design mass margin (AIAA S-120-2006 standard)
-  const massMargin = dryMass * massMarginFraction;
+  const massMargin = dryMass * safeMassMarginFraction;
   const dryMassWithMargin = dryMass + massMargin;
 
-  // Propellant mass calculation using Tsiolkovsky rocket equation:
-  // Delta_v = Isp * g0 * ln(m_wet / m_dry) => m_wet = m_dry * exp(Delta_v / (Isp * g0))
-  let propellantMass = 0;
-  const ispSeconds = Number(propulsion?.ispSeconds) || 0;
+  const ispSeconds = finiteNonNegative(propulsion?.ispSeconds);
 
-  if (requiredDeltaVMs > 0 && ispSeconds > 0) {
-    const effectiveExhaustVelocity = ispSeconds * CONSTANTS.g0;
-    const massRatio = Math.exp(requiredDeltaVMs / effectiveExhaustVelocity);
-    // Propellant needed to accelerate dry mass with margin
-    propellantMass = dryMassWithMargin * (massRatio - 1);
-  } else if (Number(propulsion?.initialPropellantKg) > 0) {
-    // Fixed propellant load if specified
-    propellantMass = Number(propulsion.initialPropellantKg);
+  const configuredPropellantValue = propulsion?.initialPropellantKg;
+
+  const hasConfiguredPropellantLoad =
+    hasFiniteNonNegativeValue(configuredPropellantValue);
+
+  const configuredPropellantMassKg = hasConfiguredPropellantLoad
+    ? Number(configuredPropellantValue)
+    : null;
+
+  // Required propellant for the requested mission delta-V.
+  let requiredPropellantMassKg = 0;
+
+  if (safeRequiredDeltaVMs > 0) {
+    if (ispSeconds > 0 && dryMassWithMargin > 0) {
+      const effectiveExhaustVelocity = ispSeconds * CONSTANTS.g0;
+
+      requiredPropellantMassKg =
+        dryMassWithMargin *
+        Math.expm1(
+          safeRequiredDeltaVMs / effectiveExhaustVelocity
+        );
+    } else {
+      requiredPropellantMassKg = null;
+    }
   }
 
-  // Total wet launch mass
+  // Use configured propellant when available.
+  // Otherwise retain the legacy propellant-sizing behavior.
+  const propellantMass = hasConfiguredPropellantLoad
+    ? configuredPropellantMassKg
+    : (requiredPropellantMassKg ?? 0);
+
   const totalLaunchMass = dryMassWithMargin + propellantMass;
+
+  // Theoretical delta-V capability from configured propellant.
+  let availableDeltaVMs = null;
+
+  if (
+    hasConfiguredPropellantLoad &&
+    ispSeconds > 0 &&
+    dryMassWithMargin > 0
+  ) {
+    const effectiveExhaustVelocity = ispSeconds * CONSTANTS.g0;
+
+    availableDeltaVMs =
+      effectiveExhaustVelocity *
+      Math.log1p(
+        configuredPropellantMassKg / dryMassWithMargin
+      );
+  }
+
+  const deltaVFeasible = availableDeltaVMs === null
+    ? null
+    : availableDeltaVMs + 1e-9 >= safeRequiredDeltaVMs;
+
+  const propellantMarginKg =
+    hasConfiguredPropellantLoad &&
+    requiredPropellantMassKg !== null
+      ? configuredPropellantMassKg - requiredPropellantMassKg
+      : null;
 
   return {
     busMass,
@@ -90,12 +174,25 @@ export function calculateMassBudget(config) {
     computingMass,
     thermalMass,
     propulsionDryMass,
+
     dryMass,
-    massMarginFraction,
+    massMarginFraction: safeMassMarginFraction,
     massMargin,
     dryMassWithMargin,
+
+    ispSeconds,
+    requiredDeltaVMs: safeRequiredDeltaVMs,
+    requiredPropellantMassKg,
+    configuredPropellantMassKg,
+    hasConfiguredPropellantLoad,
     propellantMass,
+    propellantMarginKg,
+
+    availableDeltaVMs,
+    deltaVFeasible,
+
     totalLaunchMass,
+
     breakdown: [
       { name: 'Bus Structure', massKg: busMass, category: 'bus' },
       { name: 'Power & Batteries', massKg: powerMass, category: 'power' },
@@ -105,8 +202,8 @@ export function calculateMassBudget(config) {
       { name: 'Onboard Computing', massKg: computingMass, category: 'computing' },
       { name: 'Thermal Control', massKg: thermalMass, category: 'thermal' },
       { name: 'Propulsion (Dry)', massKg: propulsionDryMass, category: 'propulsion' },
-      { name: 'Design Margin (20%)', massKg: massMargin, category: 'margin' },
-      { name: 'Propellant', massKg: propellantMass, category: 'propellant' },
+      { name: 'Design Margin', massKg: massMargin, category: 'margin' },
+      { name: 'Configured Propellant', massKg: propellantMass, category: 'propellant' },
     ],
   };
 }
@@ -127,19 +224,27 @@ export function checkLaunchVehicleCapacity(launchVehicle, totalLaunchMass) {
     };
   }
 
-  const capacityKg = Number(launchVehicle.payloadCapacityKg) || 0;
-  const marginKg = capacityKg - totalLaunchMass;
-  const marginPercent = capacityKg > 0 ? (marginKg / capacityKg) * 100 : 0;
+  const capacityKg = finiteNonNegative(
+    launchVehicle.payloadCapacityKg
+  );
+
+  const safeLaunchMassKg = finiteNonNegative(totalLaunchMass);
+
+  const marginKg = capacityKg - safeLaunchMassKg;
+
+  const marginPercent = capacityKg > 0
+    ? (marginKg / capacityKg) * 100
+    : 0;
 
   if (marginKg < 0) {
     return {
       isValid: false,
       capacityKg,
-      launchMassKg: totalLaunchMass,
+      launchMassKg: safeLaunchMassKg,
       marginKg,
       marginPercent,
       status: 'error',
-      message: `Spacecraft mass (${totalLaunchMass.toFixed(1)} kg) exceeds ${launchVehicle.name} capacity (${capacityKg.toFixed(1)} kg) by ${Math.abs(marginKg).toFixed(1)} kg.`,
+      message: `Spacecraft mass (${safeLaunchMassKg.toFixed(1)} kg) exceeds ${launchVehicle.name || 'the selected launch vehicle'} capacity (${capacityKg.toFixed(1)} kg) by ${Math.abs(marginKg).toFixed(1)} kg.`,
     };
   }
 
@@ -147,7 +252,7 @@ export function checkLaunchVehicleCapacity(launchVehicle, totalLaunchMass) {
     return {
       isValid: true,
       capacityKg,
-      launchMassKg: totalLaunchMass,
+      launchMassKg: safeLaunchMassKg,
       marginKg,
       marginPercent,
       status: 'warning',
@@ -158,10 +263,10 @@ export function checkLaunchVehicleCapacity(launchVehicle, totalLaunchMass) {
   return {
     isValid: true,
     capacityKg,
-    launchMassKg: totalLaunchMass,
+    launchMassKg: safeLaunchMassKg,
     marginKg,
     marginPercent,
     status: 'optimal',
-    message: `${launchVehicle.name} provides ample payload capacity (+${marginKg.toFixed(0)} kg, ${marginPercent.toFixed(1)}% margin).`,
+    message: `${launchVehicle.name || 'Selected launch vehicle'} provides ample payload capacity (+${marginKg.toFixed(0)} kg, ${marginPercent.toFixed(1)}% margin).`,
   };
 }

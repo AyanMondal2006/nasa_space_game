@@ -61,7 +61,6 @@ export const SIMULATION_PHASES = {
 
 export class SimulationEngine {
 
-  // STEP 16.3C EDIT 1:
   // Accept and store validation metrics for final mission scoring.
   // Existing two-argument constructor calls remain compatible.
 
@@ -114,7 +113,7 @@ export class SimulationEngine {
       missionTimeSeconds: 0,
       targetDurationSeconds: (this.mission?.durationDays || 90) * 86400,
       isPaused: true,
-      simulationSpeed: 1, // 1x, 2x, 5x, 10x
+      simulationSpeed: 1,
 
       // Orbit & Position
       orbitAngleRad: 0,
@@ -129,12 +128,19 @@ export class SimulationEngine {
       batteryEnergyWh: totalBatteryCapacityWh,
       batteryCapacityWh: totalBatteryCapacityWh,
       batteryPercent: totalBatteryCapacityWh > 0 ? 100 : 0,
+
       // Highest observed battery discharge since the simulation started.
       maxObservedBatteryDoDPercent: 0,
 
-      // Populated only when a future propulsion/maneuver model reports an
-      // achieved maneuver. A scripted phase transition is not delta-V proof.
+      // Propulsion and orbital insertion state.
       achievedDeltaVMs: 0,
+      orbitalInsertionComplete: false,
+      orbitalInsertionStatus: 'UNVERIFIED',
+      insertionWarningLogged: false,
+      propellantConsumedKg: 0,
+      propellantRemainingKg: readFiniteNumber(
+        this.mission?.spacecraft?.propulsion?.initialPropellantKg
+      ) ?? 0,
 
       // Data & Storage
       onboardStoredDataMB: 0,
@@ -170,12 +176,16 @@ export class SimulationEngine {
       failureReason: null,
     };
 
-    // Pre-populate objectives
+    // Pre-populate objectives.
     (this.mission?.objectives || []).forEach(obj => {
       this.state.objectivesProgress[obj.id] = 0;
     });
 
-    this.logEvent('INFO', 'PRE-LAUNCH', 'Spacecraft pre-flight diagnostics verified. All systems nominal on pad.');
+    this.logEvent(
+      'INFO',
+      'PRE-LAUNCH',
+      'Spacecraft pre-flight diagnostics verified. All systems nominal on pad.'
+    );
   }
 
   logEvent(severity, category, message) {
@@ -251,13 +261,28 @@ export class SimulationEngine {
       );
 
     } else if (this.state.status === SIMULATION_PHASES.ORBIT_INSERTION && t >= 1800) {
-      this.state.status = SIMULATION_PHASES.COMMISSIONING;
 
-      this.logEvent(
-        'MILESTONE',
-        'DEPLOYMENT',
-        'Solar array deployment mechanisms fired successfully. Star trackers acquire inertial lock.'
-      );
+      const insertionResult = this.executeOrbitalInsertion();
+
+      if (insertionResult === false) {
+        this.state.status = SIMULATION_PHASES.FAILED;
+        this.updateObjectivesProgress();
+        this.evaluateFinalScore();
+        return this.state;
+      }
+
+      // Null means propulsion capability is unverified.
+      // Remain in ORBIT_INSERTION and retry on a later tick.
+      // Never start commissioning without verified insertion.
+      if (insertionResult === true) {
+        this.state.status = SIMULATION_PHASES.COMMISSIONING;
+
+        this.logEvent(
+          'MILESTONE',
+          'DEPLOYMENT',
+          'Spacecraft propulsion manoeuvre verified. Solar array deployment and commissioning sequence initiated.'
+        );
+      }
 
     } else if (this.state.status === SIMULATION_PHASES.COMMISSIONING && t >= 7200) {
       this.state.status = SIMULATION_PHASES.PRIMARY_OPS;
@@ -275,7 +300,7 @@ export class SimulationEngine {
     this.state.orbitAngleRad =
       (this.state.orbitAngleRad + (meanMotion * dt)) % (2 * Math.PI);
 
-    // Calculate sub-satellite ground coordinates
+    // Calculate sub-satellite ground coordinates.
     const incRad =
       (this.orbitCalc.inclinationDeg * Math.PI) / 180;
 
@@ -289,7 +314,7 @@ export class SimulationEngine {
     this.state.latitude = coords.latitude;
     this.state.longitude = coords.longitude;
 
-    // Eclipse geometry
+    // Eclipse geometry.
     const orbitPos = getOrbitPositionAndEclipse(
       this.orbitCalc.radiusM,
       incRad,
@@ -315,7 +340,7 @@ export class SimulationEngine {
       );
     }
 
-    // 3. Ground Station Contact Window Evaluation
+    // 3. Ground Station Contact Window Evaluation.
     // Determine contact before selecting the spacecraft's operating power load.
     this.updateGroundStationContact();
 
@@ -421,6 +446,7 @@ export class SimulationEngine {
     // An absent battery is not assigned an artificial 100% DoD observation.
     if (this.state.batteryCapacityWh > 0) {
       const observedDoDPercent = 100 - this.state.batteryPercent;
+
       this.state.maxObservedBatteryDoDPercent = Math.max(
         this.state.maxObservedBatteryDoDPercent,
         observedDoDPercent
@@ -591,6 +617,25 @@ export class SimulationEngine {
 
     // 9. Mission Duration Completion Check
     if (this.state.missionTimeSeconds >= this.state.targetDurationSeconds) {
+      const requiredDeltaVMs = readFiniteNumber(this.mission?.deltaVRequiredMs);
+      const insertionRequired = requiredDeltaVMs !== null && requiredDeltaVMs > 0;
+
+      if (insertionRequired && !this.state.orbitalInsertionComplete) {
+        this.state.status = SIMULATION_PHASES.FAILED;
+        this.state.orbitalInsertionStatus = 'UNVERIFIED';
+        this.state.failureReason =
+          'Orbital insertion was not verified before the mission duration expired.';
+
+        this.logEvent(
+          'CRITICAL',
+          'ORBIT INSERTION TIMEOUT',
+          this.state.failureReason
+        );
+
+        this.updateObjectivesProgress();
+        this.evaluateFinalScore();
+        return this.state;
+      }
 
       this.state.status = SIMULATION_PHASES.COMPLETED;
 
@@ -604,6 +649,120 @@ export class SimulationEngine {
     }
 
     return this.state;
+  }
+
+  /**
+   * Executes the planned idealized propulsion manoeuvre using the validated
+   * propellant inventory and Tsiolkovsky delta-V capability.
+   *
+   * This is a single-burn game model. It is not a finite-burn trajectory
+   * integrator and does not model gravity losses, thrust direction, staging,
+   * or planetary capture dynamics.
+   *
+   * Returns true when insertion is verified or not required, false when
+   * quantified propellant evidence proves the manoeuvre is infeasible, and
+   * null when the available evidence is insufficient to verify capability.
+   * Missing evidence never grants permission to enter commissioning.
+   */
+  executeOrbitalInsertion() {
+    const requiredDeltaVMs = readFiniteNumber(
+      this.mission?.deltaVRequiredMs
+    );
+
+    if (requiredDeltaVMs === null || requiredDeltaVMs <= 0) {
+      this.state.orbitalInsertionComplete = true;
+      this.state.orbitalInsertionStatus = 'NOT_REQUIRED';
+
+      this.logEvent(
+        'INFO',
+        'ORBIT INSERTION',
+        'No positive mission delta-V requirement was configured; no propulsion insertion burn was executed.'
+      );
+
+      return true;
+    }
+
+    const massMetrics = this.validationMetrics?.mass;
+
+    const availableDeltaVMs = readFiniteNumber(
+      massMetrics?.availableDeltaVMs
+    );
+
+    if (availableDeltaVMs === null) {
+      this.state.orbitalInsertionComplete = false;
+      this.state.orbitalInsertionStatus = 'UNVERIFIED';
+
+      if (!this.state.insertionWarningLogged) {
+        this.logEvent(
+          'WARNING',
+          'ORBIT INSERTION',
+          'Insertion manoeuvre remains unverified because configured propellant capability is unavailable. Commissioning is blocked until propulsion evidence is provided.'
+        );
+
+        this.state.insertionWarningLogged = true;
+      }
+
+      // Tri-state result: null means not verified, not successful.
+      return null;
+    }
+
+    const achievedDeltaVMs = Math.max(
+      0,
+      Math.min(requiredDeltaVMs, availableDeltaVMs)
+    );
+
+    this.state.achievedDeltaVMs = achievedDeltaVMs;
+
+    const configuredPropellantKg = readFiniteNumber(
+      massMetrics?.configuredPropellantMassKg
+    );
+
+    const requiredPropellantKg = readFiniteNumber(
+      massMetrics?.requiredPropellantMassKg
+    );
+
+    if (configuredPropellantKg !== null) {
+      const consumedPropellantKg = requiredPropellantKg !== null
+        ? Math.min(configuredPropellantKg, requiredPropellantKg)
+        : configuredPropellantKg;
+
+      this.state.propellantConsumedKg = consumedPropellantKg;
+
+      this.state.propellantRemainingKg = Math.max(
+        0,
+        configuredPropellantKg - consumedPropellantKg
+      );
+    }
+
+    if (availableDeltaVMs + 1e-9 < requiredDeltaVMs) {
+      this.state.orbitalInsertionComplete = false;
+      this.state.orbitalInsertionStatus = 'FAILED';
+      this.state.propellantRemainingKg = 0;
+
+      this.state.failureReason =
+        `Orbital insertion failed: configured propulsion can provide ${availableDeltaVMs.toFixed(1)} m/s, but the mission requires ${requiredDeltaVMs.toFixed(1)} m/s.`;
+
+      this.logEvent(
+        'CRITICAL',
+        'ORBIT INSERTION FAILURE',
+        this.state.failureReason
+      );
+
+      return false;
+    }
+
+    this.state.achievedDeltaVMs = requiredDeltaVMs;
+    this.state.orbitalInsertionComplete = true;
+    this.state.orbitalInsertionStatus = 'VERIFIED';
+    this.state.insertionWarningLogged = false;
+
+    this.logEvent(
+      'SUCCESS',
+      'ORBIT INSERTION',
+      `Propulsion manoeuvre completed. ${requiredDeltaVMs.toFixed(1)} m/s achieved with ${this.state.propellantRemainingKg.toFixed(1)} kg of modelled propellant remaining.`
+    );
+
+    return true;
   }
 
   updateGroundStationContact() {
@@ -731,6 +890,7 @@ export class SimulationEngine {
       0,
       (readFiniteNumber(this.state.totalDataCollectedMB) ?? 0) / 1024
     );
+
     const totalDownlinkedGB = Math.max(
       0,
       (readFiniteNumber(this.state.totalDataDownlinkedMB) ?? 0) / 1024
@@ -748,14 +908,17 @@ export class SimulationEngine {
       let progress = 0;
 
       switch (objective.type) {
+
         case 'data_volume': {
           // Data-volume objectives measure collection by default. A campaign
           // that explicitly requires returned data can set dataSource to
           // 'downlinked' on that objective.
           const dataSource = String(objective.dataSource || 'collected').toLowerCase();
+
           const measuredDataGB = dataSource === 'downlinked'
             ? totalDownlinkedGB
             : totalCollectedGB;
+
           const targetGB = readFiniteNumber(objective.targetValueGB);
 
           progress = progressTowardMinimum(measuredDataGB, targetGB);
@@ -767,11 +930,14 @@ export class SimulationEngine {
             0,
             readFiniteNumber(this.state.totalDataCollectedMB) ?? 0
           );
+
           const downlinkedMB = Math.max(
             0,
             readFiniteNumber(this.state.totalDataDownlinkedMB) ?? 0
           );
+
           const targetPercent = readFiniteNumber(objective.targetValuePercent);
+
           const actualPercent = collectedMB > 0
             ? (downlinkedMB / collectedMB) * 100
             : 0;
@@ -785,6 +951,7 @@ export class SimulationEngine {
           // not a threshold on instantaneous battery state-of-charge.
           const batteryCapacityWh = readFiniteNumber(this.state.batteryCapacityWh);
           const targetMaxDoD = readFiniteNumber(objective.targetValueMaxDoD);
+
           const normalizedTargetMaxDoD = targetMaxDoD !== null && targetMaxDoD > 1
             ? targetMaxDoD / 100
             : targetMaxDoD;
@@ -793,9 +960,12 @@ export class SimulationEngine {
             const observedDoDPercent = readFiniteNumber(
               this.state.maxObservedBatteryDoDPercent
             ) ?? 0;
+
             const observedDoDFraction = observedDoDPercent / 100;
+
             const validatedDoD = readFiniteNumber(powerMetrics?.dodReached);
             const validatedDoDPercent = readFiniteNumber(powerMetrics?.dodPercent);
+
             const validatedDoDFraction = validatedDoD !== null
               ? validatedDoD
               : (validatedDoDPercent !== null ? validatedDoDPercent / 100 : null);
@@ -809,12 +979,14 @@ export class SimulationEngine {
               normalizedTargetMaxDoD
             );
           }
+
           break;
         }
 
         case 'budget_performance': {
           const totalCost = readFiniteNumber(budgetMetrics?.totalCost);
           const budgetLimit = readFiniteNumber(this.mission?.budgetLimitUSD);
+
           // The current Earth campaign description requires at least 10% of
           // the allocated budget to remain as contingency. Campaigns can
           // override this threshold with objective.targetReservePercent.
@@ -830,11 +1002,13 @@ export class SimulationEngine {
           ) {
             const actualReservePercent =
               ((budgetLimit - totalCost) / budgetLimit) * 100;
+
             progress = progressTowardMinimum(
               actualReservePercent,
               requiredReservePercent
             );
           }
+
           break;
         }
 
@@ -842,12 +1016,14 @@ export class SimulationEngine {
           const actualPowerMarginPercent = readFiniteNumber(
             powerMetrics?.daylightPowerMarginPercent
           );
+
           const targetPowerMarginPercent = readFiniteNumber(objective.targetValuePercent);
 
           progress = progressTowardMinimum(
             actualPowerMarginPercent,
             targetPowerMarginPercent
           );
+
           break;
         }
 
@@ -858,18 +1034,20 @@ export class SimulationEngine {
           const actualThermalMarginW = readFiniteNumber(
             thermalMetrics?.thermalMarginW
           );
+
           const targetThermalMarginW = readFiniteNumber(objective.targetValueMinWatts);
 
           progress = progressTowardMinimum(
             actualThermalMarginW,
             targetThermalMarginW
           );
+
           break;
         }
 
         case 'orbital_insertion': {
           // A scripted mission phase is not proof that the required delta-V
-          // maneuver occurred. The propulsion model must report achievedDeltaVMs.
+          // manoeuvre occurred. The propulsion model must report achievedDeltaVMs.
           const achievedDeltaVMs = readFiniteNumber(this.state.achievedDeltaVMs);
           const targetDeltaVMs = readFiniteNumber(objective.targetValueDeltaVMs);
 
@@ -877,21 +1055,23 @@ export class SimulationEngine {
             achievedDeltaVMs,
             targetDeltaVMs
           );
+
           break;
         }
 
         case 'operational_readiness': {
-          // The current validator does not yet publish a consolidated
-          // readiness percentage. Use it when added; never substitute time.
+          // Use the explicit validation metric; never substitute elapsed time.
           const readinessPercent = readFiniteNumber(
             this.validationMetrics?.operationalReadinessPercent
           );
+
           const targetReadinessPercent = readFiniteNumber(objective.targetValuePercent);
 
           progress = progressTowardMinimum(
             readinessPercent,
             targetReadinessPercent
           );
+
           break;
         }
 
@@ -910,7 +1090,6 @@ export class SimulationEngine {
   recordTelemetrySnapshot() {
 
     const snapshot = {
-
       timeSeconds:
         this.state.missionTimeSeconds,
 
@@ -928,6 +1107,21 @@ export class SimulationEngine {
 
       maxObservedBatteryDoDPercent:
         Number(this.state.maxObservedBatteryDoDPercent.toFixed(1)),
+
+      achievedDeltaVMs:
+        Number(this.state.achievedDeltaVMs.toFixed(1)),
+
+      orbitalInsertionComplete:
+        this.state.orbitalInsertionComplete,
+
+      orbitalInsertionStatus:
+        this.state.orbitalInsertionStatus,
+
+      propellantConsumedKg:
+        Number(this.state.propellantConsumedKg.toFixed(2)),
+
+      propellantRemainingKg:
+        Number(this.state.propellantRemainingKg.toFixed(2)),
 
       batteryEnergyWh:
         Math.round(this.state.batteryEnergyWh),
@@ -963,12 +1157,10 @@ export class SimulationEngine {
     }
   }
 
-  // STEP 16.3C EDIT 2:
   // Pass the actual stored validation metrics into the scoring engine.
   // Do not replace validationMetrics with null.
 
   evaluateFinalScore() {
-
     this.state.score = calculateMissionScore({
       mission: this.mission,
       simulationState: this.state,

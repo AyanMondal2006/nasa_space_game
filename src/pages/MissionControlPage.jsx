@@ -41,6 +41,7 @@ export default function MissionControlPage() {
   const state = simState || {};
   const isCompleted = state.status === 'COMPLETED';
   const isFailed = state.status === 'FAILED';
+  const activeAnomalies = Array.isArray(state.activeAnomalies) ? state.activeAnomalies : [];
 
   return (
     <div className="space-y-4 pb-16">
@@ -199,6 +200,163 @@ export default function MissionControlPage() {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Active Anomalies */}
+          <div className="space-panel p-4 space-y-3">
+            <div className="flex items-center justify-between border-b border-space-border/60 pb-2">
+              <span className="text-xs font-mono font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 text-amber-400" />
+                Active Anomalies
+              </span>
+              <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                activeAnomalies.length > 0
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                  : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+              }`}>
+                {activeAnomalies.length} ACTIVE
+              </span>
+            </div>
+
+            {activeAnomalies.length === 0 ? (
+              <div className="rounded-lg bg-space-950/60 border border-space-border/60 p-3 text-center">
+                <CheckCircle2 className="w-6 h-6 text-emerald-400 mx-auto mb-2" />
+                <div className="text-xs font-mono text-emerald-400 font-bold">
+                  NO ACTIVE ANOMALIES
+                </div>
+                <div className="text-[10px] text-slate-500 mt-1">
+                  No temporary anomaly is currently affecting spacecraft operations.
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {activeAnomalies.map((anomaly) => {
+                  const effects = anomaly.effects || {};
+                  const impacts = [];
+
+                  if (
+                    Number.isFinite(effects.powerGenerationMultiplier) &&
+                    effects.powerGenerationMultiplier < 1
+                  ) {
+                    impacts.push(
+                      `Power generation reduced by ${Math.round((1 - effects.powerGenerationMultiplier) * 100)}%`
+                    );
+                  }
+
+                  if (
+                    Number.isFinite(effects.dataCollectionMultiplier) &&
+                    effects.dataCollectionMultiplier < 1
+                  ) {
+                    impacts.push(
+                      `Data collection reduced by ${Math.round((1 - effects.dataCollectionMultiplier) * 100)}%`
+                    );
+                  }
+
+                  if (
+                    Number.isFinite(effects.downlinkMultiplier) &&
+                    effects.downlinkMultiplier < 1
+                  ) {
+                    impacts.push(
+                      `Downlink reduced by ${Math.round((1 - effects.downlinkMultiplier) * 100)}%`
+                    );
+                  }
+
+                  if (
+                    Number.isFinite(effects.additionalPowerLoadW) &&
+                    effects.additionalPowerLoadW > 0
+                  ) {
+                    impacts.push(
+                      `Additional power load: +${effects.additionalPowerLoadW} W`
+                    );
+                  }
+
+                  const remainingSeconds =
+                    Number.isFinite(anomaly.expiresAtSeconds)
+                      ? Math.max(
+                          0,
+                          anomaly.expiresAtSeconds -
+                            (Number(state.missionTimeSeconds) || 0)
+                        )
+                      : null;
+
+                  const appliedHealthImpact =
+                    Number.isFinite(anomaly.appliedHealthImpact)
+                      ? anomaly.appliedHealthImpact
+                      : 0;
+
+                  return (
+                    <div
+                      key={anomaly.id}
+                      className="rounded-lg bg-amber-950/20 border border-amber-500/30 p-3 space-y-2"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-xs font-mono font-bold text-amber-300">
+                            {anomaly.title || anomaly.id}
+                          </div>
+                          <div className="text-[10px] text-slate-400 mt-1">
+                            SUBSYSTEM: {anomaly.subsystem?.toUpperCase() || 'UNKNOWN'}
+                          </div>
+                        </div>
+                        <span className="text-[9px] font-mono font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5 shrink-0">
+                          WARNING
+                        </span>
+                      </div>
+
+                      <p className="text-[11px] text-slate-300 leading-relaxed">
+                        {anomaly.message || 'Temporary spacecraft anomaly detected.'}
+                      </p>
+
+                      <div className="rounded bg-space-950/70 border border-space-border/60 p-2 space-y-1.5">
+                        <div className="text-[10px] uppercase font-mono font-bold text-slate-400">
+                          Operational Impact
+                        </div>
+                        {impacts.length > 0 ? (
+                          impacts.map((impact, index) => (
+                            <div
+                              key={`${anomaly.id}-impact-${index}`}
+                              className="text-[10px] font-mono text-amber-300"
+                            >
+                              • {impact}
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-[10px] text-slate-400">
+                            No operational effect details available.
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
+                        <div className="bg-space-950/60 rounded p-2">
+                          <span className="text-slate-500 block">TIME REMAINING</span>
+                          <span className="text-amber-300 font-bold">
+                            {remainingSeconds === null
+                              ? 'UNKNOWN'
+                              : formatMET(remainingSeconds)}
+                          </span>
+                        </div>
+                        <div className="bg-space-950/60 rounded p-2">
+                          <span className="text-slate-500 block">HEALTH IMPACT</span>
+                          <span className="text-rose-300 font-bold">
+                            -{appliedHealthImpact} POINTS
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 text-[10px] font-mono text-emerald-400 border-t border-space-border/50 pt-2">
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                        AUTO-RECOVERY ARMED
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="text-[9px] font-mono text-slate-500">
+              Historical triggers and recovery confirmations are recorded in Mission Events Log.
             </div>
           </div>
         </div>

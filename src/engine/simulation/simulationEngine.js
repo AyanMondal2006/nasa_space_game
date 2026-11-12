@@ -13,6 +13,11 @@ import { calculateCommunicationsBudget } from '../calculations/communications.js
 import { calculateMissionScore } from './missionScoring.js';
 import { CELESTIAL_BODIES } from '../constants/physics.js';
 import { formatMET } from '../../utils/formatters.js';
+import {
+  getAnomalyProbability,
+  getAvailableRandomAnomalies,
+  calculateOperationalEffectsForInterval,
+} from './anomalySystem.js';
 
 /** Return a finite number, or null when evidence is absent/invalid. */
 function readFiniteNumber(value) {
@@ -169,6 +174,7 @@ export class SimulationEngine {
       },
 
       // Objectives tracking
+      activeAnomalies: [],
       objectivesProgress: {},
       events: [],
       telemetryHistory: [],
@@ -245,6 +251,7 @@ export class SimulationEngine {
       return this.state;
     }
 
+    const intervalStartSeconds = this.state.missionTimeSeconds;
     const dt = baseDeltaSeconds * this.state.simulationSpeed;
     this.state.missionTimeSeconds += dt;
 
@@ -293,6 +300,13 @@ export class SimulationEngine {
         'Initial commissioning complete. Primary payload science observation sequence initiated.'
       );
     }
+
+
+    const operationalEffects = calculateOperationalEffectsForInterval(
+      this.state.activeAnomalies,
+      intervalStartSeconds,
+      dt
+    );
 
     // 2. Orbital Kinematics
     const meanMotion = this.orbitCalc.meanMotionRadPerSec;
@@ -407,6 +421,13 @@ export class SimulationEngine {
           : powerConfig.daylightLoadW;
     }
 
+    // Apply time-weighted anomaly effects to spacecraft power.
+    this.state.currentPowerGenerationW *=
+      operationalEffects.powerGenerationMultiplier;
+
+    this.state.currentPowerConsumptionW +=
+      operationalEffects.additionalPowerLoadW;
+
     // Battery Integration: dE = (P_gen - P_load) * dt
     const netPowerWatts =
       this.state.currentPowerGenerationW -
@@ -519,7 +540,7 @@ export class SimulationEngine {
 
       // Average generated data for this simulation tick (MB).
       const dataGenTickMB =
-        safeDataRateMBps * dt * safeDutyCycle;
+        safeDataRateMBps * dt * safeDutyCycle * operationalEffects.dataCollectionMultiplier;
 
       this.state.totalDataCollectedMB += dataGenTickMB;
 
@@ -576,10 +597,10 @@ export class SimulationEngine {
             : 0;
 
         this.state.currentDownlinkRateMbps =
-          safeDownlinkRateMbps;
+          safeDownlinkRateMbps * operationalEffects.downlinkMultiplier;
 
         const downlinkCapacityMB =
-          safeDownlinkRateMBps * dt;
+          safeDownlinkRateMBps * operationalEffects.downlinkMultiplier * dt;
 
         const actualDownlinkedMB = Math.min(
           this.state.onboardStoredDataMB,
@@ -599,7 +620,8 @@ export class SimulationEngine {
       }
     }
 
-    // 6. Probabilistic Aerospace Anomalies (Deterministic Seed)
+    // Process anomaly triggers and recovery after this tick.
+    // Newly triggered anomalies affect the following tick.
     this.checkAnomalies(dt);
 
     // 7. Update Objective Progress
@@ -831,56 +853,108 @@ export class SimulationEngine {
     this.state.activeGroundStation = contactStation;
   }
 
+  /**
+   * Processes temporary anomalies using simulated mission time.
+   * Expired anomalies restore their recorded subsystem-health impact.
+   */
   checkAnomalies(dt) {
+    const now = this.state.missionTimeSeconds;
+    const remainingAnomalies = [];
 
-    // Only trigger occasional anomalies during primary operations.
-    if (this.state.status !== SIMULATION_PHASES.PRIMARY_OPS) {
+    // 1. Expire anomalies and restore their applied health impact.
+    for (const anomaly of this.state.activeAnomalies || []) {
+      if (anomaly.expiresAtSeconds <= now) {
+        const currentHealth =
+          readFiniteNumber(
+            this.state.subsystemHealth?.[anomaly.subsystem]
+          ) ?? 100;
+
+        this.state.subsystemHealth[anomaly.subsystem] = Math.min(
+          100,
+          currentHealth + anomaly.appliedHealthImpact
+        );
+
+        this.logEvent(
+          'SUCCESS',
+          'ANOMALY RECOVERY',
+          anomaly.recoveryMessage
+        );
+      } else {
+        remainingAnomalies.push(anomaly);
+      }
+    }
+
+    this.state.activeAnomalies = remainingAnomalies;
+
+    // 2. Trigger anomalies only during primary operations.
+    if (
+      this.state.status !== SIMULATION_PHASES.PRIMARY_OPS ||
+      !Number.isFinite(dt) ||
+      dt <= 0
+    ) {
       return;
     }
 
-    // 0.05% chance per hour of minor telemetry events.
-    const hourlyChance = 0.0005 * (dt / 3600);
+    // 3. Prevent duplicate instances of an active anomaly.
+    const activeIds = new Set(
+      remainingAnomalies.map((anomaly) => anomaly.id)
+    );
 
-    if (this.rng.chance(hourlyChance)) {
-
-      const anomalyTypes = [
-        {
-          subsystem: 'adcs',
-          msg: 'Minor star tracker bright particle noise detected. Reaction wheel attitude bias trimmed automatically.',
-          healthImpact: 2,
-        },
-        {
-          subsystem: 'comms',
-          msg: 'Solar radio burst caused transient bit errors during ground pass. Error-correcting Reed-Solomon codes recovered frames.',
-          healthImpact: 1,
-        },
-        {
-          subsystem: 'thermal',
-          msg: 'Solar aspect angle shifted payload radiator temperature by +2.5°C. Active louvers compensated.',
-          healthImpact: 0,
-        },
-        {
-          subsystem: 'battery',
-          msg: 'Lithium-ion cell balance circuitry completed automated periodic reconditioning cycle.',
-          healthImpact: 1,
-        },
-      ];
-
-      const anomaly = this.rng.choice(anomalyTypes);
-
-      this.state.subsystemHealth[anomaly.subsystem] = Math.max(
-        60,
-        this.state.subsystemHealth[anomaly.subsystem] - anomaly.healthImpact
+    const availableAnomalies =
+      getAvailableRandomAnomalies(this.mission).filter(
+        (anomaly) => !activeIds.has(anomaly.id)
       );
 
-      this.logEvent(
-        'WARNING',
-        'ANOMALY',
-        anomaly.msg
-      );
+    if (availableAnomalies.length === 0) {
+      return;
     }
-  }
 
+    // 4. Calculate probability using gameplay difficulty.
+    const probability = getAnomalyProbability(
+      dt,
+      this.mission?.gameplayDifficulty || 'standard'
+    );
+
+    if (!this.rng.chance(probability)) {
+      return;
+    }
+
+    // 5. Select a compatible anomaly deterministically.
+    const anomaly = this.rng.choice(availableAnomalies);
+
+    if (!anomaly) {
+      return;
+    }
+
+    // 6. Apply subsystem-health impact, retaining the actual amount.
+    const currentHealth =
+      readFiniteNumber(
+        this.state.subsystemHealth?.[anomaly.subsystem]
+      ) ?? 100;
+
+    const newHealth = Math.max(
+      60,
+      currentHealth - anomaly.healthImpact
+    );
+
+    const appliedHealthImpact = currentHealth - newHealth;
+
+    this.state.subsystemHealth[anomaly.subsystem] = newHealth;
+
+    // 7. Register the temporary anomaly and its expiry time.
+    this.state.activeAnomalies.push({
+      ...anomaly,
+      startedAtSeconds: now,
+      expiresAtSeconds: now + anomaly.durationSeconds,
+      appliedHealthImpact,
+    });
+
+    this.logEvent(
+      'WARNING',
+      'ANOMALY',
+      anomaly.message
+    );
+  }
   updateObjectivesProgress() {
     const objectives = Array.isArray(this.mission?.objectives)
       ? this.mission.objectives

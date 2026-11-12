@@ -3,60 +3,140 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
+  :root,
+  [data-theme="cyber"] {
+    --color-accent-rgb: 56 189 248;
+    --color-secondary-rgb: 59 130 246;
     --color-bg-space: #030712;
+    --color-space-950: #030712;
+    --color-space-900: #060d1f;
+    --color-space-850: #0a142e;
+    --color-space-800: #0f1d3d;
+    --color-space-750: #15264f;
+    --color-space-700: #1c3264;
+    --color-space-600: #264382;
+    --color-space-border: rgba(56, 189, 248, 0.16);
     --color-panel: rgba(10, 20, 46, 0.7);
-    --color-border: rgba(56, 189, 248, 0.15);
-    --glow-cyan: 0 0 20px rgba(56, 189, 248, 0.25);
+    --glow-cyan: 0 0 20px rgba(56, 189, 248, 0.35);
+    --glow-emerald: 0 0 20px rgba(16, 185, 129, 0.25);
+  }
+
+  [data-theme="mars"] {
+    --color-accent-rgb: 239 68 68;
+    --color-secondary-rgb: 245 158 11;
+    --color-bg-space: #0d0406;
+    --color-space-950: #0d0406;
+    --color-space-900: #18080c;
+    --color-space-850: #240c12;
+    --color-space-800: #331119;
+    --color-space-750: #421620;
+    --color-space-700: #541c29;
+    --color-space-600: #6b2434;
+    --color-space-border: rgba(239, 68, 68, 0.2);
+    --color-panel: rgba(38, 12, 18, 0.75);
+    --glow-cyan: 0 0 20px rgba(239, 68, 68, 0.35);
+    --glow-emerald: 0 0 20px rgba(16, 185, 129, 0.25);
+  }
+
+  [data-theme="nebula"] {
+    --color-accent-rgb: 168 85 247;
+    --color-secondary-rgb: 236 72 153;
+    --color-bg-space: #090414;
+    --color-space-950: #090414;
+    --color-space-900: #130829;
+    --color-space-850: #1d0c3e;
+    --color-space-800: #291157;
+    --color-space-750: #361770;
+    --color-space-700: #461f8f;
+    --color-space-600: #5a27b8;
+    --color-space-border: rgba(168, 85, 247, 0.2);
+    --color-panel: rgba(29, 12, 62, 0.75);
+    --glow-cyan: 0 0 20px rgba(168, 85, 247, 0.35);
+    --glow-emerald: 0 0 20px rgba(16, 185, 129, 0.25);
+  }
+
+  [data-theme="emerald"] {
+    --color-accent-rgb: 16 185 129;
+    --color-secondary-rgb: 20 184 166;
+    --color-bg-space: #020f09;
+    --color-space-950: #020f09;
+    --color-space-900: #051c12;
+    --color-space-850: #08291a;
+    --color-space-800: #0c3824;
+    --color-space-750: #10472e;
+    --color-space-700: #155b3b;
+    --color-space-600: #1b734b;
+    --color-space-border: rgba(16 185, 129, 0.2);
+    --color-panel: rgba(8, 41, 26, 0.75);
+    --glow-cyan: 0 0 20px rgba(16, 185, 129, 0.35);
+    --glow-emerald: 0 0 20px rgba(16, 185, 129, 0.35);
+  }
+
+  [data-theme="solar"] {
+    --color-accent-rgb: 245 158 11;
+    --color-secondary-rgb: 251 191 36;
+    --color-bg-space: #120b02;
+    --color-space-950: #120b02;
+    --color-space-900: #1f1304;
+    --color-space-850: #2d1c07;
+    --color-space-800: #3e260a;
+    --color-space-750: #50310e;
+    --color-space-700: #663f12;
+    --color-space-600: #804f17;
+    --color-space-border: rgba(245, 158, 11, 0.2);
+    --color-panel: rgba(45, 28, 7, 0.75);
+    --glow-cyan: 0 0 20px rgba(245, 158, 11, 0.35);
     --glow-emerald: 0 0 20px rgba(16, 185, 129, 0.25);
   }
 
   body {
-    background-color: #030712;
+    background-color: var(--color-bg-space);
     color: #e2e8f0;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    transition: background-color 0.3s ease;
   }
 
   /* Custom scrollbar */
   ::-webkit-scrollbar {
-    width: 5px;
-    height: 5px;
+    width: 6px;
+    height: 6px;
   }
   ::-webkit-scrollbar-track {
-    background: #060d1f;
+    background: var(--color-space-900, #060d1f);
   }
   ::-webkit-scrollbar-thumb {
-    background: #1c3264;
+    background: var(--color-space-700, #1c3264);
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #38bdf8;
+    background: rgb(var(--color-accent-rgb, 56 189 248));
   }
 }
 
 @layer components {
   /* Aerospace Glassmorphic Panels */
   .space-panel {
-    background: rgba(10, 20, 46, 0.65);
+    background: var(--color-panel, rgba(10, 20, 46, 0.65));
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(56, 189, 248, 0.16);
+    border: 1px solid var(--color-space-border, rgba(56, 189, 248, 0.16));
     border-radius: 0.5rem;
+    transition: border-color 0.25s ease, background-color 0.25s ease, box-shadow 0.25s ease;
   }
 
   .space-panel-hover {
-    transition: all 0.2s ease-in-out;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .space-panel-hover:hover {
-    border-color: rgba(56, 189, 248, 0.4);
-    box-shadow: 0 4px 20px -2px rgba(56, 189, 248, 0.15);
-    transform: translateY(-1px);
+    border-color: rgba(var(--color-accent-rgb, 56 189 248), 0.45);
+    box-shadow: 0 4px 20px -2px rgba(var(--color-accent-rgb, 56 189 248), 0.2);
+    transform: translateY(-2px);
   }
 
   .space-panel-active {
-    background: rgba(15, 29, 61, 0.85);
-    border-color: #38bdf8;
-    box-shadow: 0 0 15px -3px rgba(56, 189, 248, 0.3);
+    background: var(--color-space-850, rgba(15, 29, 61, 0.85));
+    border-color: rgb(var(--color-accent-rgb, 56 189 248));
+    box-shadow: 0 0 16px -2px rgba(var(--color-accent-rgb, 56 189 248), 0.35);
   }
 
   /* Telemetry Status Dots */
@@ -64,7 +144,7 @@
     box-shadow: 0 0 8px #10b981, 0 0 16px rgba(16, 185, 129, 0.3);
   }
   .status-dot-cyan {
-    box-shadow: 0 0 8px #38bdf8, 0 0 16px rgba(56, 189, 248, 0.3);
+    box-shadow: 0 0 8px rgb(var(--color-accent-rgb, 56 189 248)), 0 0 16px rgba(var(--color-accent-rgb, 56 189 248), 0.4);
   }
   .status-dot-amber {
     box-shadow: 0 0 8px #f59e0b, 0 0 16px rgba(245, 158, 11, 0.3);
@@ -76,27 +156,28 @@
   /* Grid overlay for flight consoles */
   .telemetry-grid {
     background-image: 
-      linear-gradient(to right, rgba(56, 189, 248, 0.04) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(56, 189, 248, 0.04) 1px, transparent 1px);
+      linear-gradient(to right, rgba(var(--color-accent-rgb, 56 189 248), 0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(var(--color-accent-rgb, 56 189 248), 0.04) 1px, transparent 1px);
     background-size: 24px 24px;
   }
 
-  /* Enhanced starfield background */
+  /* Enhanced starfield background with theme tint */
   .starfield-bg {
-    background-color: #030712;
+    background-color: var(--color-space-950, #030712);
     background-image: 
       radial-gradient(1px 1px at 20px 30px, rgba(255,255,255,0.9), rgba(0,0,0,0)),
       radial-gradient(1px 1px at 40px 70px, rgba(255,255,255,0.7), rgba(0,0,0,0)),
-      radial-gradient(1.5px 1.5px at 90px 40px, #38bdf8, rgba(0,0,0,0)),
+      radial-gradient(1.5px 1.5px at 90px 40px, rgb(var(--color-accent-rgb, 56 189 248)), rgba(0,0,0,0)),
       radial-gradient(1px 1px at 160px 120px, rgba(255,255,255,0.8), rgba(0,0,0,0)),
       radial-gradient(1.5px 1.5px at 230px 190px, rgba(255,255,255,0.6), rgba(0,0,0,0)),
-      radial-gradient(1px 1px at 300px 80px, #93c5fd, rgba(0,0,0,0)),
+      radial-gradient(1px 1px at 300px 80px, rgb(var(--color-secondary-rgb, 59 130 246)), rgba(0,0,0,0)),
       radial-gradient(2px 2px at 350px 240px, rgba(255,255,255,0.9), rgba(0,0,0,0)),
       radial-gradient(1px 1px at 70px 180px, rgba(255,255,255,0.5), rgba(0,0,0,0)),
-      radial-gradient(1.5px 1.5px at 180px 260px, #7dd3fc, rgba(0,0,0,0)),
+      radial-gradient(1.5px 1.5px at 180px 260px, rgb(var(--color-accent-rgb, 56 189 248)), rgba(0,0,0,0)),
       radial-gradient(1px 1px at 260px 320px, rgba(255,255,255,0.7), rgba(0,0,0,0));
     background-repeat: repeat;
     background-size: 400px 400px;
+    transition: background-color 0.4s ease;
   }
 
   /* Animated scanning line for telemetry */
@@ -111,13 +192,27 @@
     left: -100%;
     width: 40%;
     height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(56,189,248,0.06), transparent);
+    background: linear-gradient(90deg, transparent, rgba(var(--color-accent-rgb, 56 189 248), 0.1), transparent);
     animation: scanLine 4s linear infinite;
+  }
+
+  /* Radar beam sweep */
+  .radar-sweep {
+    position: relative;
+    overflow: hidden;
+  }
+  .radar-sweep::after {
+    content: '';
+    position: absolute;
+    inset: -50%;
+    background: conic-gradient(from 0deg, transparent 0deg 330deg, rgba(var(--color-accent-rgb, 56 189 248), 0.25) 360deg);
+    animation: radarSweep 6s linear infinite;
+    pointer-events: none;
   }
 
   /* Glow shadows */
   .shadow-glow-cyan {
-    box-shadow: 0 0 20px -4px rgba(56, 189, 248, 0.4);
+    box-shadow: 0 0 22px -3px rgba(var(--color-accent-rgb, 56 189 248), 0.5);
   }
   .shadow-glow-emerald {
     box-shadow: 0 0 20px -4px rgba(16, 185, 129, 0.4);
@@ -142,6 +237,12 @@
     to { transform: rotate(360deg); }
   }
 
+  /* Radar sweep animation */
+  @keyframes radarSweep {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
   /* Scanning line animation */
   @keyframes scanLine {
     0% { left: -40%; }
@@ -150,8 +251,8 @@
 
   /* Pulse glow */
   @keyframes pulseGlow {
-    0%, 100% { box-shadow: 0 0 5px rgba(56, 189, 248, 0.3); }
-    50% { box-shadow: 0 0 20px rgba(56, 189, 248, 0.6); }
+    0%, 100% { box-shadow: 0 0 5px rgba(var(--color-accent-rgb, 56 189 248), 0.3); }
+    50% { box-shadow: 0 0 22px rgba(var(--color-accent-rgb, 56 189 248), 0.65); }
   }
 
   /* Fade in animation */
@@ -161,22 +262,25 @@
   }
 
   .animate-fade-in {
-    animation: fadeIn 0.3s ease-out forwards;
+    animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 
   /* Slow pulse for orbit icon */
   @keyframes pulseSlow {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(0.96); }
   }
   .animate-pulse-slow {
     animation: pulseSlow 3s ease-in-out infinite;
   }
 
-  /* Number counter animate */
-  @keyframes numberCount {
-    from { opacity: 0; }
-    to { opacity: 1; }
+  /* Subtly floating animation */
+  @keyframes floatSlow {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+  }
+  .animate-float-slow {
+    animation: floatSlow 5s ease-in-out infinite;
   }
 
   /* HUD corner decorators */
@@ -189,18 +293,19 @@
     position: absolute;
     width: 8px;
     height: 8px;
-    border-color: rgba(56, 189, 248, 0.4);
+    border-color: rgba(var(--color-accent-rgb, 56 189 248), 0.45);
     border-style: solid;
+    pointer-events: none;
   }
   .hud-corner::before {
     top: 0;
     left: 0;
-    border-width: 1px 0 0 1px;
+    border-width: 1.5px 0 0 1.5px;
   }
   .hud-corner::after {
     bottom: 0;
     right: 0;
-    border-width: 0 1px 1px 0;
+    border-width: 0 1.5px 1.5px 0;
   }
 
   /* Blinking cursor for terminal text */
@@ -208,7 +313,7 @@
     content: '█';
     animation: blink 1s step-end infinite;
     opacity: 0.7;
-    color: #38bdf8;
+    color: rgb(var(--color-accent-rgb, 56 189 248));
   }
   @keyframes blink {
     0%, 100% { opacity: 0; }

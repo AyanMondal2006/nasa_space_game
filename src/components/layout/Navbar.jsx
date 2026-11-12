@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useMission } from '../../state/MissionContext.jsx';
 import { useTheme } from '../../state/ThemeContext.jsx';
+import { shareService } from '../../utils/shareService.js';
 import { 
   Rocket, 
   Orbit, 
@@ -13,17 +14,26 @@ import {
   VolumeX,
   PanelLeftClose,
   PanelLeftOpen,
-  Check
+  Check,
+  Share2,
+  GraduationCap,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 
-export default function Navbar({ onToggleSidebar, isSidebarOpen }) {
+export default function Navbar({ onToggleSidebar, isSidebarOpen, onOpenTour }) {
   const { 
     currentMission, 
+    activeTab,
     setActiveTab, 
     saveCurrentMission, 
     teamRole, 
     setTeamRole,
-    isSimRunning 
+    isSimRunning,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
   } = useMission();
 
   const {
@@ -39,6 +49,7 @@ export default function Navbar({ onToggleSidebar, isSidebarOpen }) {
   } = useTheme();
 
   const [savedToast, setSavedToast] = useState(false);
+  const [shareToast, setShareToast] = useState(false);
   const [themeDropdownOpen, setThemeDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -58,6 +69,15 @@ export default function Navbar({ onToggleSidebar, isSidebarOpen }) {
     saveCurrentMission();
     setSavedToast(true);
     setTimeout(() => setSavedToast(false), 2000);
+  };
+
+  const handleShare = async () => {
+    playUiSound('beep');
+    const res = await shareService.copyShareUrlToClipboard(currentMission);
+    if (res.success) {
+      setShareToast(true);
+      setTimeout(() => setShareToast(false), 2500);
+    }
   };
 
   const roles = [
@@ -89,7 +109,7 @@ export default function Navbar({ onToggleSidebar, isSidebarOpen }) {
           <button
             onClick={toggleSidebarCollapse}
             className="hidden lg:flex p-2 text-slate-400 hover:text-orbit-cyan rounded-md hover:bg-space-900 border border-space-border transition items-center justify-center group"
-            title={isSidebarCollapsed ? 'Expand Sidebar [Ctrl+B]' : 'Collapse Sidebar to Icon Rail'}
+            title={isSidebarCollapsed ? 'Expand Sidebar [Ctrl+B]' : 'Collapse Sidebar to Icon Rail [Ctrl+B]'}
             aria-label="Toggle Sidebar Collapse"
           >
             {isSidebarCollapsed ? (
@@ -136,8 +156,55 @@ export default function Navbar({ onToggleSidebar, isSidebarOpen }) {
           </span>
         </div>
 
-        {/* Right: Theme Selector, Audio Toggle, Role Selector, Save & Flight Control */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        {/* Right: Flight Academy, Undo/Redo, Theme, Audio, Share, Save & Flight Control */}
+        <div className="flex items-center gap-1.5 sm:gap-2.5">
+          {/* Flight Academy Guided Tour Button */}
+          {onOpenTour && (
+            <button
+              onClick={() => {
+                playUiSound('click');
+                onOpenTour();
+              }}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-mono border border-space-border bg-space-900/80 hover:bg-space-850 hover:border-orbit-cyan/40 text-slate-200 transition"
+              title="Open Flight Academy Orientation Tour"
+            >
+              <GraduationCap className="w-3.5 h-3.5 text-orbit-cyan" />
+              <span className="hidden xl:inline text-[11px]">Academy</span>
+            </button>
+          )}
+
+          {/* Undo / Redo for Spacecraft Design */}
+          {activeTab === 'designer' && (
+            <div className="hidden sm:flex items-center bg-space-900/80 border border-space-border rounded p-0.5">
+              <button
+                onClick={() => {
+                  playUiSound('click');
+                  undo();
+                }}
+                disabled={!canUndo}
+                className={`p-1 rounded transition ${
+                  canUndo ? 'text-slate-200 hover:text-white hover:bg-space-850' : 'text-slate-600 cursor-not-allowed'
+                }`}
+                title="Undo last modification [Ctrl+Z]"
+              >
+                <Undo2 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => {
+                  playUiSound('click');
+                  redo();
+                }}
+                disabled={!canRedo}
+                className={`p-1 rounded transition ${
+                  canRedo ? 'text-slate-200 hover:text-white hover:bg-space-850' : 'text-slate-600 cursor-not-allowed'
+                }`}
+                title="Redo modification [Ctrl+Y]"
+              >
+                <Redo2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Theme Switcher Popover */}
           <div className="relative" ref={dropdownRef}>
             <button
@@ -217,25 +284,15 @@ export default function Navbar({ onToggleSidebar, isSidebarOpen }) {
             </span>
           </button>
 
-          {/* Local Team Mode Role Selector */}
-          <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded bg-space-900/60 border border-space-border text-xs">
-            <Users className="w-3.5 h-3.5 text-orbit-cyan shrink-0" />
-            <select
-              value={teamRole}
-              onChange={(e) => {
-                playUiSound('click');
-                setTeamRole(e.target.value);
-              }}
-              className="bg-transparent text-slate-300 text-xs font-mono focus:outline-none cursor-pointer"
-              title="Team Collaborative Role"
-            >
-              {roles.map(r => (
-                <option key={r} value={r} className="bg-space-900 text-slate-200">
-                  {r}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Deep-link Share Button */}
+          <button
+            onClick={handleShare}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-mono border border-space-border bg-space-900/80 hover:bg-space-850 hover:border-orbit-cyan/40 text-slate-200 transition"
+            title="Copy One-Click Deep-Link Share URL to Clipboard"
+          >
+            <Share2 className="w-3.5 h-3.5 text-orbit-cyan" />
+            <span className="hidden sm:inline text-[11px]">{shareToast ? 'Link Copied!' : 'Share'}</span>
+          </button>
 
           {/* Save Mission Button */}
           <button
@@ -253,7 +310,7 @@ export default function Navbar({ onToggleSidebar, isSidebarOpen }) {
               playUiSound('switch');
               setActiveTab('control');
             }}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded text-xs font-mono font-bold transition shadow-sm ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono font-bold transition shadow-sm ${
               isSimRunning 
                 ? 'bg-emerald-600 text-white animate-pulse'
                 : 'bg-orbit-cyan/15 text-orbit-cyan hover:bg-orbit-cyan hover:text-space-950 border border-orbit-cyan/40 shadow-glow-cyan'

@@ -77,17 +77,30 @@ export default function SpacecraftViewer3D({ spacecraft, highlightedCategory }) 
     window.addEventListener('mouseup', onMouseUp);
 
     let animationId;
+    let isVisible = true;
+    let observer;
+
+    if (typeof IntersectionObserver !== 'undefined') {
+      observer = new IntersectionObserver(([entry]) => {
+        isVisible = entry.isIntersecting;
+      }, { threshold: 0.05 });
+      observer.observe(container);
+    }
+
     const animate = () => {
       animationId = requestAnimationFrame(animate);
-      if (!isDragging) {
-        modelGroup.rotation.y += 0.003;
+      if (isVisible) {
+        if (!isDragging) {
+          modelGroup.rotation.y += 0.003;
+        }
+        renderer.render(scene, camera);
       }
-      renderer.render(scene, camera);
     };
     animate();
 
     return () => {
       cancelAnimationFrame(animationId);
+      if (observer) observer.disconnect();
       container.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);

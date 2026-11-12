@@ -34,6 +34,7 @@ import {
 
 import { persistenceService } from '../services/persistenceService.js';
 import { exportService } from '../services/exportService.js';
+import { shareService } from '../utils/shareService.js';
 
 import {
   applyDifficultyToObjectives,
@@ -82,6 +83,93 @@ export function MissionProvider({ children }) {
       initialCampaign.defaultConfiguration
     );
   });
+
+  // Undo / Redo History Buffers for Spacecraft Design
+  const [historyStack, setHistoryStack] = useState([]);
+  const [redoStack, setRedoStack] = useState([]);
+  const [importedToast, setImportedToast] = useState(false);
+
+  const pushUndo = (previousMission) => {
+    if (!previousMission) return;
+    setHistoryStack(prev => [...prev.slice(-20), previousMission]);
+    setRedoStack([]);
+  };
+
+  const undo = () => {
+    if (historyStack.length === 0) return;
+    const previous = historyStack[historyStack.length - 1];
+    setHistoryStack(h => h.slice(0, -1));
+    setRedoStack(r => [currentMission, ...r]);
+    setCurrentMission(previous);
+    persistenceService.setActiveMission(previous);
+  };
+
+  const redo = () => {
+    if (redoStack.length === 0) return;
+    const next = redoStack[0];
+    setRedoStack(r => r.slice(1));
+    setHistoryStack(h => [...h, currentMission]);
+    setCurrentMission(next);
+    persistenceService.setActiveMission(next);
+  };
+
+  // Keyboard shortcuts Ctrl+Z and Ctrl+Y / Ctrl+Shift+Z for design mutations
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'z' || e.key === 'Z') {
+          if (e.shiftKey) {
+            e.preventDefault();
+            redo();
+          } else {
+            e.preventDefault();
+            undo();
+          }
+        } else if (e.key === 'y' || e.key === 'Y') {
+          e.preventDefault();
+          redo();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [historyStack, redoStack, currentMission]);
+
+  // Deep-link URL hash detection on initial load
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.hash) {
+      const shared = shareService.decodeMission(window.location.hash);
+      if (shared) {
+        const campaign = MISSION_CAMPAIGNS.find(c => c.scenarioId === shared.scenarioId) || MISSION_CAMPAIGNS[0];
+        const hydrated = assembleMissionFromConfig(
+          campaign,
+          {
+            busId: shared.spacecraft?.busId,
+            powerId: shared.spacecraft?.powerId,
+            batteryId: shared.spacecraft?.batteryId,
+            instrumentsIds: shared.spacecraft?.instrumentIds || [],
+            commsId: shared.spacecraft?.commsId,
+            adcsId: shared.spacecraft?.adcsId,
+            computingId: shared.spacecraft?.computingId,
+            thermalId: shared.spacecraft?.thermalId,
+            propulsionId: shared.spacecraft?.propulsionId,
+            propellantLoadKg: shared.spacecraft?.propellantLoadKg,
+            launchVehicleId: shared.launchVehicleId,
+            orbitId: shared.orbitId,
+            deltaVRequiredMs: shared.deltaVRequiredMs,
+          },
+          shared.gameplayDifficulty
+        );
+        hydrated.title = shared.title || hydrated.title;
+        setCurrentMission(hydrated);
+        persistenceService.setActiveMission(hydrated);
+        setActiveTab('designer');
+        setImportedToast(true);
+        setTimeout(() => setImportedToast(false), 5000);
+      }
+    }
+  }, []);
 
   // Real-time Mission Validation Engine
   const validationResults = useMemo(() => {
@@ -227,6 +315,7 @@ export function MissionProvider({ children }) {
   // Spacecraft & Mission Mutations
   const updateSpacecraft = (subsystemKey, componentOrArray) => {
     setCurrentMission(prev => {
+      pushUndo(prev);
       const next = {
         ...prev,
         spacecraft: {
@@ -243,6 +332,7 @@ export function MissionProvider({ children }) {
 
   const updateOrbit = (orbit) => {
     setCurrentMission(prev => {
+      pushUndo(prev);
       const next = {
         ...prev,
         orbit,
@@ -257,6 +347,7 @@ export function MissionProvider({ children }) {
 
   const updateLaunchVehicle = (launchVehicle) => {
     setCurrentMission(prev => {
+      pushUndo(prev);
       const next = {
         ...prev,
         launchVehicle,
@@ -271,6 +362,7 @@ export function MissionProvider({ children }) {
 
   const updateMissionParameters = (params) => {
     setCurrentMission(prev => {
+      pushUndo(prev);
       const next = {
         ...prev,
         ...params,
@@ -531,6 +623,12 @@ export function MissionProvider({ children }) {
         updateOrbit,
         updateLaunchVehicle,
         updateMissionParameters,
+        undo,
+        redo,
+        canUndo: historyStack.length > 0,
+        canRedo: redoStack.length > 0,
+        importedToast,
+        setImportedToast,
 
         validationResults,
 

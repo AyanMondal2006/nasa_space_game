@@ -16,12 +16,14 @@ import {
   Radio, 
   Clock, 
   BookOpen, 
-  Sparkles 
+  Sparkles,
+  GraduationCap
 } from 'lucide-react';
 import SpaceVisualization3D from '../components/visualization/SpaceVisualization3D.jsx';
+import CanvasErrorBoundary from '../components/common/CanvasErrorBoundary.jsx';
 import { formatCurrency, formatMass } from '../utils/formatters.js';
 
-export default function HomePage() {
+export default function HomePage({ onOpenTour }) {
   const { 
     currentMission, 
     setActiveTab, 
@@ -88,20 +90,32 @@ export default function HomePage() {
                 <Play className="w-4 h-4" />
                 <span>Open Flight Console</span>
               </button>
+
+              {onOpenTour && (
+                <button
+                  onClick={onOpenTour}
+                  className="flex items-center gap-2 px-4 py-3 rounded-lg bg-space-900/80 hover:bg-space-850 border border-orbit-cyan/30 text-orbit-cyan font-mono text-sm transition"
+                >
+                  <GraduationCap className="w-4 h-4" />
+                  <span>Flight Academy Tour</span>
+                </button>
+              )}
             </div>
           </div>
 
           {/* Interactive 3D Orbit Preview */}
           <div className="lg:col-span-5 h-[340px] rounded-xl overflow-hidden border border-space-border shadow-2xl relative">
-            <SpaceVisualization3D
-              bodyId={currentMission?.destination || 'earth'}
-              altitudeKm={currentMission?.orbit?.altitudeKm || 705}
-              inclinationDeg={currentMission?.orbit?.inclinationDeg || 98.2}
-              orbitAngleRad={1.2}
-              isInEclipse={false}
-              isContacting={true}
-              subSatelliteCoords={{ latitude: 28.5, longitude: -80.6 }}
-            />
+            <CanvasErrorBoundary>
+              <SpaceVisualization3D
+                bodyId={currentMission?.destination || 'earth'}
+                altitudeKm={currentMission?.orbit?.altitudeKm || 705}
+                inclinationDeg={currentMission?.orbit?.inclinationDeg || 98.2}
+                orbitAngleRad={1.2}
+                isInEclipse={false}
+                isContacting={true}
+                subSatelliteCoords={{ latitude: 28.5, longitude: -80.6 }}
+              />
+            </CanvasErrorBoundary>
             <div className="absolute bottom-2 left-2 text-[10px] font-mono text-slate-400 bg-space-950/80 px-2 py-0.5 rounded border border-space-border backdrop-blur">
               Real-Time Astrodynamics Render
             </div>

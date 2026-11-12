@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useMission } from '../state/MissionContext.jsx';
 import { calculateCircularOrbit, calculateHohmannTransfer } from '../engine/calculations/orbitalMechanics.js';
 import SpaceVisualization3D from '../components/visualization/SpaceVisualization3D.jsx';
+import CanvasErrorBoundary from '../components/common/CanvasErrorBoundary.jsx';
 import { 
   Orbit, 
   RotateCw, 
@@ -78,15 +79,17 @@ export default function OrbitExplorerPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left: 3D Visualization */}
         <div className="lg:col-span-7 h-[460px] rounded-xl overflow-hidden border border-space-border shadow-2xl relative">
-          <SpaceVisualization3D
-            bodyId={bodyId}
-            altitudeKm={altitudeKm}
-            inclinationDeg={inclinationDeg}
-            orbitAngleRad={0.8}
-            isInEclipse={orbitMetrics?.maxEclipseFraction > 0.3}
-            isContacting={true}
-            subSatelliteCoords={{ latitude: inclinationDeg * 0.5, longitude: 45 }}
-          />
+          <CanvasErrorBoundary>
+            <SpaceVisualization3D
+              bodyId={bodyId}
+              altitudeKm={altitudeKm}
+              inclinationDeg={inclinationDeg}
+              orbitAngleRad={0.8}
+              isInEclipse={orbitMetrics?.maxEclipseFraction > 0.3}
+              isContacting={true}
+              subSatelliteCoords={{ latitude: inclinationDeg * 0.5, longitude: 45 }}
+            />
+          </CanvasErrorBoundary>
         </div>
 
         {/* Right: Orbit Parameter Controls & Live Readouts */}

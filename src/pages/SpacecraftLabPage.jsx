@@ -12,6 +12,7 @@ import {
   PROPULSION_CATALOG 
 } from '../data/spacecraftComponents.js';
 import SpacecraftViewer3D from '../components/visualization/SpacecraftViewer3D.jsx';
+import CanvasErrorBoundary from '../components/common/CanvasErrorBoundary.jsx';
 import { 
   Cpu, 
   Zap, 
@@ -180,7 +181,9 @@ export default function SpacecraftLabPage() {
             <h3 className="font-mono font-bold text-xs text-white uppercase tracking-wider">
               3D Spacecraft Inspection
             </h3>
-            <SpacecraftViewer3D spacecraft={spacecraft} highlightedCategory={activeCategory} />
+            <CanvasErrorBoundary>
+              <SpacecraftViewer3D spacecraft={spacecraft} highlightedCategory={activeCategory} />
+            </CanvasErrorBoundary>
           </div>
 
           {/* Mass Distribution Breakdown */}

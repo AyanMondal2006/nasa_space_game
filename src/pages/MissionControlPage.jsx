@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useMission } from '../state/MissionContext.jsx';
+import { useTheme } from '../state/ThemeContext.jsx';
+import { soundFx } from '../utils/soundEffects.js';
 import SpaceVisualization3D from '../components/visualization/SpaceVisualization3D.jsx';
+import CanvasErrorBoundary from '../components/common/CanvasErrorBoundary.jsx';
 import { 
   Play, 
   Pause, 
@@ -37,10 +40,34 @@ export default function MissionControlPage() {
   } = useMission();
 
   const [activeTelemetryTab, setActiveTelemetryTab] = useState('power'); // 'power' | 'battery' | 'data' | 'downlink'
+  const { soundEnabled } = useTheme();
+  const prevContactRef = useRef(false);
+  const prevStatusRef = useRef(null);
 
   const state = simState || {};
   const isCompleted = state.status === 'COMPLETED';
   const isFailed = state.status === 'FAILED';
+
+  // Ground Station Radio & Burn Immersion Acoustic Cues
+  useEffect(() => {
+    if (!soundEnabled) return;
+    const contacting = Boolean(state.isContactingGroundStation);
+    if (contacting && !prevContactRef.current) {
+      soundFx.playQuindarIntro();
+    } else if (!contacting && prevContactRef.current) {
+      soundFx.playQuindarOutro();
+    }
+    prevContactRef.current = contacting;
+
+    if (state.status && state.status !== prevStatusRef.current) {
+      if (state.status === 'ORBIT_INSERTION') {
+        soundFx.playBurnTone();
+      } else if (state.status === 'FAILED') {
+        soundFx.playAlertWarning();
+      }
+      prevStatusRef.current = state.status;
+    }
+  }, [state.isContactingGroundStation, state.status, soundEnabled]);
 
   return (
     <div className="space-y-4 pb-16">
@@ -205,15 +232,17 @@ export default function MissionControlPage() {
 
         {/* CENTER: 3D Animated Orbital Spacecraft Track */}
         <div className="lg:col-span-6 h-[460px] rounded-xl overflow-hidden border border-space-border relative shadow-2xl">
-          <SpaceVisualization3D
-            bodyId={currentMission?.destination || 'earth'}
-            altitudeKm={currentMission?.orbit?.altitudeKm || 500}
-            inclinationDeg={currentMission?.orbit?.inclinationDeg || 45}
-            orbitAngleRad={state.orbitAngleRad || 0}
-            isInEclipse={state.isInEclipse || false}
-            isContacting={state.isContactingGroundStation || false}
-            subSatelliteCoords={{ latitude: state.latitude || 0, longitude: state.longitude || 0 }}
-          />
+          <CanvasErrorBoundary>
+            <SpaceVisualization3D
+              bodyId={currentMission?.destination || 'earth'}
+              altitudeKm={currentMission?.orbit?.altitudeKm || 500}
+              inclinationDeg={currentMission?.orbit?.inclinationDeg || 45}
+              orbitAngleRad={state.orbitAngleRad || 0}
+              isInEclipse={state.isInEclipse || false}
+              isContacting={state.isContactingGroundStation || false}
+              subSatelliteCoords={{ latitude: state.latitude || 0, longitude: state.longitude || 0 }}
+            />
+          </CanvasErrorBoundary>
         </div>
 
         {/* RIGHT PANEL: Live Telemetry Gauges */}

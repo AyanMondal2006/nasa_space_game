@@ -15,6 +15,7 @@ import { LAUNCH_VEHICLES } from '../data/launchVehicles.js';
 import { ORBIT_CATALOG } from '../data/orbits.js';
 import ValidationAlerts from '../components/common/ValidationAlerts.jsx';
 import SpacecraftViewer3D from '../components/visualization/SpacecraftViewer3D.jsx';
+import CanvasErrorBoundary from '../components/common/CanvasErrorBoundary.jsx';
 import { 
   Sliders, 
   Check, 
@@ -30,7 +31,9 @@ import {
   Save, 
   Play,
   Plus,
-  Trash2
+  Trash2,
+  Undo2,
+  Redo2
 } from 'lucide-react';
 import { formatCurrency, formatMass, formatPower } from '../utils/formatters.js';
 
@@ -55,7 +58,11 @@ export default function MissionDesignerPage() {
     validationResults, 
     saveCurrentMission, 
     setActiveTab, 
-    startSimulation 
+    startSimulation,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
   } = useMission();
 
   const [currentStep, setCurrentStep] = useState(1);
@@ -89,7 +96,46 @@ export default function MissionDesignerPage() {
   };
 
   return (
-    <div className="space-y-6 pb-16">
+    <div className="space-y-4 pb-16">
+      {/* Top Designer Toolbar: Step Title & Undo/Redo Controls */}
+      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+        <div className="flex items-center gap-2 text-xs font-mono">
+          <span className="text-slate-400">DESIGN BENCH:</span>
+          <span className="text-orbit-cyan font-bold">
+            STEP {currentStep} OF 8: {WIZARD_STEPS[currentStep - 1]?.name}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={undo}
+            disabled={!canUndo}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono border transition ${
+              canUndo
+                ? 'bg-space-900 border-space-border text-slate-200 hover:text-white hover:border-orbit-cyan/40 shadow-sm'
+                : 'bg-space-950/60 border-transparent text-slate-600 cursor-not-allowed'
+            }`}
+            title="Undo last change [Ctrl+Z]"
+          >
+            <Undo2 className="w-3.5 h-3.5" />
+            <span>Undo</span>
+          </button>
+          <button
+            onClick={redo}
+            disabled={!canRedo}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono border transition ${
+              canRedo
+                ? 'bg-space-900 border-space-border text-slate-200 hover:text-white hover:border-orbit-cyan/40 shadow-sm'
+                : 'bg-space-950/60 border-transparent text-slate-600 cursor-not-allowed'
+            }`}
+            title="Redo change [Ctrl+Y]"
+          >
+            <Redo2 className="w-3.5 h-3.5" />
+            <span>Redo</span>
+          </button>
+        </div>
+      </div>
+
       {/* Wizard Step Progression Bar */}
       <div className="space-panel p-4 overflow-x-auto">
         <div className="flex items-center justify-between min-w-[700px] gap-2">
@@ -638,15 +684,17 @@ export default function MissionDesignerPage() {
               </span>
             </div>
 
-            <SpacecraftViewer3D
-              spacecraft={spacecraft}
-              highlightedCategory={
-                currentStep === 2 ? 'bus' :
-                currentStep === 3 ? 'payload' :
-                currentStep === 4 ? 'power' :
-                currentStep === 5 ? 'comms' : null
-              }
-            />
+            <CanvasErrorBoundary>
+              <SpacecraftViewer3D
+                spacecraft={spacecraft}
+                highlightedCategory={
+                  currentStep === 2 ? 'bus' :
+                  currentStep === 3 ? 'payload' :
+                  currentStep === 4 ? 'power' :
+                  currentStep === 5 ? 'comms' : null
+                }
+              />
+            </CanvasErrorBoundary>
 
             {/* Quick Live Spec Table */}
             <div className="text-xs font-mono space-y-1.5 pt-2 border-t border-space-border/60">

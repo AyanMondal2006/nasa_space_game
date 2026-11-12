@@ -221,17 +221,29 @@ export default function SpaceVisualization3D({
     window.addEventListener('mouseup', handleMouseUp);
     container.addEventListener('wheel', handleWheel, { passive: false });
 
-    // 7. Animation Loop
+    // 7. Animation Loop with Visibility Throttling
     let animationFrameId;
+    let isVisible = true;
+    let observer;
+
+    if (typeof IntersectionObserver !== 'undefined') {
+      observer = new IntersectionObserver(([entry]) => {
+        isVisible = entry.isIntersecting;
+      }, { threshold: 0.05 });
+      observer.observe(container);
+    }
+
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
 
-      // Rotate planet slowly
-      if (planetMeshRef.current && isRotating) {
-        planetMeshRef.current.rotation.y += 0.001;
-      }
+      if (isVisible) {
+        // Rotate planet slowly
+        if (planetMeshRef.current && isRotating) {
+          planetMeshRef.current.rotation.y += 0.001;
+        }
 
-      renderer.render(scene, camera);
+        renderer.render(scene, camera);
+      }
     };
     animate();
 
@@ -248,6 +260,7 @@ export default function SpaceVisualization3D({
 
     return () => {
       cancelAnimationFrame(animationFrameId);
+      if (observer) observer.disconnect();
       container.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);

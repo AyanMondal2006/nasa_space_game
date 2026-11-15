@@ -30,7 +30,9 @@ export default function MissionControlPage() {
   const { 
     currentMission, 
     simState, 
-    isSimRunning, 
+    isSimRunning,
+    fastForwardMission,
+    fastForwardProgress, 
     startSimulation, 
     pauseSimulation, 
     resumeSimulation, 
@@ -153,6 +155,37 @@ export default function MissionControlPage() {
             <RotateCcw className="w-3.5 h-3.5" />
             <span>Restart</span>
           </button>
+
+          {/* Temporary Genuine Mission Fast-Forward */}
+          {!isSimRunning && !isCompleted && !isFailed && (
+            <button
+              onClick={fastForwardMission}
+              disabled={fastForwardProgress?.running === true}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-space-950 font-mono font-bold text-xs transition"
+              title="Execute the genuine mission simulation at 10x until completion or failure"
+            >
+              <FastForward className="w-4 h-4" />
+              <span>
+                {fastForwardProgress?.running
+                  ? `PROCESSING ${fastForwardProgress.percent}%`
+                  : 'FAST-FORWARD MISSION'}
+              </span>
+            </button>
+          )}
+
+          {fastForwardProgress && (
+            <span className={`text-[10px] font-mono font-bold ${
+              fastForwardProgress.running
+                ? 'text-amber-300'
+                : fastForwardProgress.status === 'COMPLETED'
+                  ? 'text-emerald-400'
+                  : 'text-rose-400'
+            }`}>
+              {fastForwardProgress.running
+                ? `${fastForwardProgress.percent}%`
+                : `RESULT: ${fastForwardProgress.status}`}
+            </span>
+          )}
 
           {/* Return to Designer */}
           <button

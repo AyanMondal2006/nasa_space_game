@@ -42,6 +42,47 @@ import {
   DIFFICULTY_PROFILE_VERSION,
 } from '../data/difficultyProfiles.js';
 
+/**
+ * Creates a detached React-facing snapshot of simulation state.
+ *
+ * The simulation engine retains ownership of its mutable arrays.
+ * React and visualization components receive independent copies.
+ */
+function createSimulationSnapshot(state) {
+  if (!state || typeof state !== 'object') {
+    return state;
+  }
+
+  return {
+    ...state,
+
+    subsystemHealth: {
+      ...(state.subsystemHealth || {}),
+    },
+
+    objectivesProgress: {
+      ...(state.objectivesProgress || {}),
+    },
+
+    telemetryHistory: Array.isArray(state.telemetryHistory)
+      ? state.telemetryHistory.map((entry) => ({ ...entry }))
+      : [],
+
+    events: Array.isArray(state.events)
+      ? state.events.map((event) => ({ ...event }))
+      : [],
+
+    activeAnomalies: Array.isArray(state.activeAnomalies)
+      ? state.activeAnomalies.map((anomaly) => ({
+          ...anomaly,
+          effects:
+            anomaly.effects && typeof anomaly.effects === 'object'
+              ? { ...anomaly.effects }
+              : anomaly.effects,
+        }))
+      : [],
+  };
+}
 const MissionContext = createContext(null);
 
 export function MissionProvider({ children }) {
@@ -181,6 +222,8 @@ export function MissionProvider({ children }) {
 
   const [simState, setSimState] = useState(null);
   const [isSimRunning, setIsSimRunning] = useState(false);
+  const [fastForwardProgress, setFastForwardProgress] = useState(null);
+  const fastForwardInProgressRef = useRef(false);
 
   // Initialize or re-create simulation engine when mission changes.
   const initSimulation = useCallback(() => {
@@ -196,7 +239,7 @@ export function MissionProvider({ children }) {
 
     simEngineRef.current = sim;
 
-    setSimState({ ...sim.state });
+    setSimState(createSimulationSnapshot(sim.state));
     setIsSimRunning(false);
   }, [currentMission, validationResults]);
 
@@ -216,7 +259,7 @@ export function MissionProvider({ children }) {
 
         const nextState = engine.step(60);
 
-        setSimState({ ...nextState });
+        setSimState(createSimulationSnapshot(nextState));
 
         // If completed or failed, save to reports.
         if (
@@ -272,6 +315,182 @@ export function MissionProvider({ children }) {
     });
   };
 
+
+  /**
+   * Temporary demonstration utility.
+   * Executes the genuine simulation engine at 10x in
+   * browser-friendly batches and uses the normal report writer.
+   */
+  const fastForwardMission = async () => {
+    const engine = simEngineRef.current;
+    const missionForRun = currentMission;
+
+    if (!engine || !missionForRun) {
+      return { success: false, error: 'No active mission or simulation engine.' };
+    }
+
+    if (fastForwardInProgressRef.current) {
+      return { success: false, error: 'Fast-forward is already running.' };
+    }
+
+    if (isSimRunning) {
+      return { success: false, error: 'Pause the normal simulation first.' };
+    }
+
+    const terminalStatuses = [
+      SIMULATION_PHASES.COMPLETED,
+      SIMULATION_PHASES.FAILED,
+    ];
+
+    if (terminalStatuses.includes(engine.state.status)) {
+      return { success: false, error: 'This simulation has already ended.' };
+    }
+
+    const targetSeconds = engine.state.targetDurationSeconds;
+
+    if (
+      !Number.isFinite(targetSeconds) ||
+      targetSeconds <= 0
+    ) {
+      return { success: false, error: 'Invalid mission duration.' };
+    }
+
+    fastForwardInProgressRef.current = true;
+
+    try {
+      setIsSimRunning(false);
+      setFastForwardProgress({
+        running: true,
+        percent: 0,
+        status: 'RUNNING',
+      });
+
+      // Match the normal simulation engine's 60-second base tick at 10x.
+      engine.setSpeed(10);
+
+      if (engine.state.status === SIMULATION_PHASES.PRE_LAUNCH) {
+        engine.start();
+      } else {
+        engine.resume();
+      }
+
+      setSimState(createSimulationSnapshot(engine.state));
+
+      const simulatedSecondsPerTick = 60 * 10;
+      const remainingSeconds = Math.max(
+        0,
+        targetSeconds - engine.state.missionTimeSeconds
+      );
+
+      // Extra margin permits the final tick and terminal-state evaluation.
+      const maxTicks = Math.ceil(
+        remainingSeconds / simulatedSecondsPerTick
+      ) + 5;
+
+      const batchSize = 100;
+      let processedTicks = 0;
+
+      while (
+        processedTicks < maxTicks &&
+        !terminalStatuses.includes(engine.state.status)
+      ) {
+        const batchEnd = Math.min(
+          processedTicks + batchSize,
+          maxTicks
+        );
+
+        while (
+          processedTicks < batchEnd &&
+          !terminalStatuses.includes(engine.state.status)
+        ) {
+          engine.step(60);
+          processedTicks++;
+        }
+
+        const latestState = engine.state;
+
+        const percent = Math.min(
+          100,
+          Math.round(
+            (latestState.missionTimeSeconds / targetSeconds) * 100
+          )
+        );
+
+        // Refresh Mission Control after every batch.
+        setSimState(createSimulationSnapshot(latestState));
+
+        setFastForwardProgress({
+          running: !terminalStatuses.includes(latestState.status),
+          percent,
+          status: latestState.status,
+          processedTicks,
+        });
+
+        if (terminalStatuses.includes(latestState.status)) {
+          break;
+        }
+
+        // Give the browser time to render progress and handle input.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      engine.pause();
+
+      const finalState = engine.state;
+      const isTerminal = terminalStatuses.includes(finalState.status);
+
+      setIsSimRunning(false);
+      setSimState(createSimulationSnapshot(finalState));
+
+      // Use the existing genuine report-generation mechanism.
+      if (isTerminal && finalState.score) {
+        saveCompletedReport(missionForRun, finalState);
+      }
+
+      setFastForwardProgress({
+        running: false,
+        percent: Math.min(
+          100,
+          Math.round(
+            (finalState.missionTimeSeconds / targetSeconds) * 100
+          )
+        ),
+        status: finalState.status,
+        processedTicks,
+        reportSaved: Boolean(isTerminal && finalState.score),
+      });
+
+      return {
+        success: finalState.status === SIMULATION_PHASES.COMPLETED,
+        status: finalState.status,
+        finalMET: finalState.missionTimeSeconds,
+        score: finalState.score,
+        reportSaved: Boolean(isTerminal && finalState.score),
+        failureReason: finalState.failureReason,
+      };
+    } catch (error) {
+      engine.pause();
+
+      setIsSimRunning(false);
+      setSimState(createSimulationSnapshot(engine.state));
+
+      setFastForwardProgress({
+        running: false,
+        status: 'ERROR',
+        error: error?.message || 'Unknown fast-forward error.',
+      });
+
+      console.error('ASTRAJECT fast-forward failed:', error);
+
+      return {
+        success: false,
+        error: error?.message || 'Unknown fast-forward error.',
+      };
+    } finally {
+      fastForwardInProgressRef.current = false;
+    }
+  };
+
   // Simulation Controls
   const startSimulation = () => {
     if (!simEngineRef.current) initSimulation();
@@ -279,7 +498,7 @@ export function MissionProvider({ children }) {
     simEngineRef.current.start();
 
     setIsSimRunning(true);
-    setSimState({ ...simEngineRef.current.state });
+    setSimState(createSimulationSnapshot(simEngineRef.current.state));
   };
 
   const pauseSimulation = () => {
@@ -288,7 +507,7 @@ export function MissionProvider({ children }) {
     simEngineRef.current.pause();
 
     setIsSimRunning(false);
-    setSimState({ ...simEngineRef.current.state });
+    setSimState(createSimulationSnapshot(simEngineRef.current.state));
   };
 
   const resumeSimulation = () => {
@@ -297,7 +516,7 @@ export function MissionProvider({ children }) {
     simEngineRef.current.resume();
 
     setIsSimRunning(true);
-    setSimState({ ...simEngineRef.current.state });
+    setSimState(createSimulationSnapshot(simEngineRef.current.state));
   };
 
   const setSimulationSpeed = (multiplier) => {
@@ -305,7 +524,7 @@ export function MissionProvider({ children }) {
 
     simEngineRef.current.setSpeed(multiplier);
 
-    setSimState({ ...simEngineRef.current.state });
+    setSimState(createSimulationSnapshot(simEngineRef.current.state));
   };
 
   const restartSimulation = () => {
@@ -634,6 +853,8 @@ export function MissionProvider({ children }) {
 
         simState,
         isSimRunning,
+        fastForwardMission,
+        fastForwardProgress,
         startSimulation,
         pauseSimulation,
         resumeSimulation,

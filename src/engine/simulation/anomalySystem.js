@@ -8,7 +8,7 @@
  * failure-rate predictions.
  */
 
-export const BASE_ANOMALY_RATE_PER_HOUR = 0.65;
+export const BASE_ANOMALY_RATE_PER_HOUR = 0.0005;
 
 export const ANOMALY_DIFFICULTY_MULTIPLIERS = Object.freeze({
   beginner: 0.5,
